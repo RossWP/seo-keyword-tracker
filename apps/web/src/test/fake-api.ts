@@ -1,6 +1,6 @@
 import { vi } from 'vitest';
 
-type Handler = (request: { body: unknown }) => Response | Promise<Response>;
+type Handler = (request: { body: unknown; url: URL }) => Response | Promise<Response>;
 
 export const json = (status: number, body?: unknown): Response =>
   new Response(body === undefined ? null : JSON.stringify(body), {
@@ -12,7 +12,8 @@ export const apiError = (status: number, code: string, message: string): Respons
   json(status, { error: { code, message } });
 
 /**
- * Replaces fetch with handlers keyed by "METHOD /path". Health answers ok and
+ * Replaces fetch with handlers keyed by "METHOD /path" (the query string is ignored for
+ * matching and available as `url.searchParams`). Health answers ok and
  * /api/auth/me answers 401 unless overridden; anything else is a 404 envelope.
  */
 export function fakeApi(handlers: Record<string, Handler> = {}) {
@@ -22,11 +23,11 @@ export function fakeApi(handlers: Record<string, Handler> = {}) {
     ...handlers,
   };
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-    const path = input instanceof Request ? input.url : String(input);
-    const key = `${init?.method ?? 'GET'} ${path}`;
+    const url = new URL(input instanceof Request ? input.url : String(input), 'http://localhost');
+    const key = `${init?.method ?? 'GET'} ${url.pathname}`;
     const handler = all[key];
     const body: unknown = typeof init?.body === 'string' ? JSON.parse(init.body) : undefined;
-    return handler ? handler({ body }) : apiError(404, 'not_found', `No fake for ${key}`);
+    return handler ? handler({ body, url }) : apiError(404, 'not_found', `No fake for ${key}`);
   });
   vi.stubGlobal('fetch', fetchMock);
   return fetchMock;

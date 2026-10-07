@@ -1,8 +1,8 @@
 import type { RouteObject } from 'react-router';
 import { LoginPage } from '../features/auth/login-page';
 import { RequireAuth } from '../features/auth/require-auth';
+import { PagesListPage } from '../features/pages/pages-list-page';
 import { AppLayout } from './app-layout';
-import { HomePage } from './home-page';
 import { NotFoundPage } from './not-found-page';
 
 export const routes: RouteObject[] = [
@@ -13,7 +13,7 @@ export const routes: RouteObject[] = [
       {
         element: <RequireAuth />,
         children: [
-          { index: true, element: <HomePage /> },
+          { index: true, element: <PagesListPage /> },
           { path: '*', element: <NotFoundPage /> },
         ],
       },
