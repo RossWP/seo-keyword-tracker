@@ -180,6 +180,14 @@ describe('findIssues', () => {
       codes('<html><head><meta name="robots" content="noindex,follow"></head></html>'),
     ).toContain('noindex');
     expect(codes('<html></html>', 'https://a.example/x/', 'noindex')).toContain('noindex');
+    expect(codes('<html></html>', 'https://a.example/x/', 'googlebot: noindex')).toContain(
+      'noindex',
+    );
+    expect(
+      codes(
+        '<html><head><meta name="robots" content="index,max-image-preview:none"></head></html>',
+      ),
+    ).not.toContain('noindex');
   });
 
   it('flags title length, multiple H1s, canonical elsewhere, thin content and image alts', () => {

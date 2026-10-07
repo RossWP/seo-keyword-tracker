@@ -26,10 +26,19 @@ const issue = (
 const TITLE_RANGE = { min: 30, max: 60 };
 const THIN_CONTENT_WORDS = 300;
 
+/**
+ * Robots directives are comma-separated; "none" means noindex,nofollow. Splitting on spaces too
+ * handles "googlebot: noindex" while leaving values like "max-image-preview:none" whole.
+ */
+function blocksIndexing(robots: string): boolean {
+  const directives = robots.toLowerCase().split(/[\s,]+/);
+  return directives.includes('noindex') || directives.includes('none');
+}
+
 /** Each rule is a pure function of the page (and its siblings), so each is testable alone. */
 const RULES: Rule[] = [
   (page) =>
-    /\bnoindex\b|\bnone\b/.test(page.robots)
+    blocksIndexing(page.robots)
       ? issue('noindex', 'error', 'Page asks search engines not to index it', {
           robots: page.robots,
         })
