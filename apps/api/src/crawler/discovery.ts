@@ -105,7 +105,7 @@ const NON_HTML = /\.(pdf|jpe?g|png|gif|webp|svg|zip|mp4|mp3|xml|json|css|js|txt)
 /**
  * Finds a site's blog sitemap from its URL alone and returns the first blog posts in sitemap
  * order. Nothing is site-specific: the blog hub linked from the homepage, sitemap names and
- * URL shapes are combined into a score (see README "How the blog sitemap is found").
+ * URL shapes are combined into a score (see docs/design.md, "How the blog sitemap is found").
  */
 export async function discoverBlog(
   siteUrl: string,
@@ -119,21 +119,37 @@ export async function discoverBlog(
   const robots = parseRobots(robotsUrl, await fetchRobots(robotsUrl, fetcher));
   const crawlDelay = robots.getCrawlDelay(robotsAgent) ?? robots.getCrawlDelay('*') ?? null;
 
-  const candidates = await collectCandidates(origin, robots.getSitemaps(), fetcher);
-  if (candidates.size === 0) {
+  // robots.txt entries first; if none of them leads to blog posts (missing, broken, or an
+  // index whose children are dead), the conventional locations get their turn.
+  const sources = [
+    { urls: robots.getSitemaps().filter((url) => isHttpUrl(url) && isSameSite(url, origin)) },
+    { urls: CONVENTIONAL_SITEMAPS.map((path) => origin + path), firstOnly: true },
+  ];
+  let foundSitemap = false;
+  let found: { family: Family; posts: string[] } | null = null;
+  for (const source of sources) {
+    const candidates = await collectCandidates(origin, source.urls, fetcher, source.firstOnly);
+    if (candidates.size === 0) continue;
+    foundSitemap = true;
+    const [best] = await scoreFamilies(candidates, hubUrl, origin, fetcher);
+    const posts = best
+      ? selectPosts(await familyUrls(best, fetcher, limit), origin, hubUrl, limit)
+      : [];
+    if (best && posts.length > 0) {
+      found = { family: best, posts };
+      break;
+    }
+  }
+  if (!foundSitemap) {
     throw new CrawlError(
       'no_sitemap',
       `No sitemap found: none listed in robots.txt works, and ${CONVENTIONAL_SITEMAPS.join(', ')} are missing`,
     );
   }
-
-  const families = await scoreFamilies(candidates, hubUrl, origin, fetcher);
-  const best = families[0];
-  const urls = best ? await familyUrls(best, fetcher, limit) : [];
-  const posts = selectPosts(urls, origin, hubUrl, limit);
-  if (!best || posts.length === 0) {
+  if (!found) {
     throw new CrawlError('no_blog_found', 'Sitemaps were found, but none of them lists blog posts');
   }
+  const { family: best, posts } = found;
 
   return {
     origin,
@@ -208,37 +224,22 @@ interface Candidate {
 }
 
 /**
- * Sitemap URLs worth judging: robots.txt entries (same site only) or, when none of them works,
- * the conventional locations. Indexes are expanded into their children without fetching them yet.
+ * Readable sitemaps among `urls` (same site only), with indexes expanded into their children
+ * without fetching them yet. `firstOnly` stops at the first one that works: conventional
+ * locations are guesses, and one answer is enough.
  */
 async function collectCandidates(
   origin: string,
-  robotsSitemaps: string[],
+  urls: string[],
   fetcher: Fetcher,
+  firstOnly = false,
 ): Promise<Map<string, Candidate>> {
   const candidates = new Map<string, Candidate>();
-  let fetches = 0;
-  const tryAll = async (urls: string[], stopAtFirst: boolean) => {
-    for (const url of urls) {
-      if (fetches >= MAX_SITEMAP_FETCHES) return;
-      const document = await tryReadSitemap(url, fetcher, SAMPLE_SIZE);
-      fetches++;
-      if (!document) continue;
-      addDocument(candidates, { url, depth: 0, document }, origin);
-      if (stopAtFirst) return;
-    }
-  };
-
-  await tryAll(
-    robotsSitemaps.filter((url) => isHttpUrl(url) && isSameSite(url, origin)),
-    false,
-  );
-  // Conventional paths are guesses: the first one that works is enough.
-  if (candidates.size === 0) {
-    await tryAll(
-      CONVENTIONAL_SITEMAPS.map((path) => origin + path),
-      true,
-    );
+  for (const url of urls.slice(0, MAX_SITEMAP_FETCHES)) {
+    const document = await tryReadSitemap(url, fetcher, SAMPLE_SIZE);
+    if (!document) continue;
+    addDocument(candidates, { url, depth: 0, document }, origin);
+    if (firstOnly) break;
   }
   return candidates;
 }
@@ -327,6 +328,12 @@ async function scoreFamilies(
   return families.sort((a, b) => b.score - a.score);
 }
 
+/** "/blog/post/" is under "/blog" or "/blog/"; "/blogging-tools/" is not. */
+function isUnder(path: string, hubPath: string): boolean {
+  const base = hubPath.endsWith('/') ? hubPath : `${hubPath}/`;
+  return path === hubPath || path.startsWith(base);
+}
+
 /** Sitemaps that differ only by a trailing number belong together (post-sitemap2.xml). */
 function familyKey(url: string): string {
   return url.replace(/\d+(?=(\.xml)?(\.gz)?\/?$)/i, '');
@@ -336,7 +343,7 @@ function nameScore(url: string, hubPath: string | null): number {
   const path = new URL(url).pathname.toLowerCase();
   const tokens = path.split(/[^a-z0-9]+/).filter(Boolean);
   let score = 0;
-  if (hubPath && hubPath !== '/' && path.startsWith(hubPath)) score += 40;
+  if (hubPath && hubPath !== '/' && isUnder(path, hubPath)) score += 40;
   if (tokens.some((token) => POSITIVE_TOKENS.has(token))) score += 15;
   if (tokens.some((token) => NEGATIVE_TOKENS.has(token))) score -= 30;
   return score;
@@ -347,7 +354,7 @@ function contentScore(sample: string[], hubUrl: string | null, hubPath: string |
   const paths = sample.map((url) => safePath(url));
   let score = 0;
   if (hubPath && hubPath !== '/') {
-    const underHub = paths.filter((path) => path.startsWith(hubPath) && path !== hubPath).length;
+    const underHub = paths.filter((path) => isUnder(path, hubPath) && path !== hubPath).length;
     if (underHub / paths.length >= 0.5) score += 40;
     if (hubUrl && paths.includes(hubPath)) score += 40;
   }
@@ -387,7 +394,7 @@ export function selectPosts(
     .map((url) => normalizePageUrl(url))
     .filter((url): url is string => url !== null);
   const underHub = (url: string) =>
-    hubPath !== null && hubPath !== '/' && safePath(url).startsWith(hubPath);
+    hubPath !== null && hubPath !== '/' && isUnder(safePath(url), hubPath);
   // In a sitemap that mixes everything, the blog is what sits under the hub.
   const restrictToHub =
     normalized.filter((url) => underHub(url) && safePath(url) !== hubPath).length >= limit / 3;

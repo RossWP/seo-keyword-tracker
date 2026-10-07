@@ -168,6 +168,39 @@ describe('discoverBlog', () => {
     expect(result.entries).toHaveLength(3);
   });
 
+  it('falls back to conventional locations when the robots.txt index only lists dead sitemaps', async () => {
+    const server = await site((origin) => ({
+      '/': html('<nav><a href="/blog/">Blog</a></nav>'),
+      '/robots.txt': { type: 'text/plain', body: `Sitemap: ${origin}/sitemaps/index.xml\n` },
+      '/sitemaps/index.xml': index([
+        `${origin}/sitemaps/gone-1.xml`,
+        `${origin}/sitemaps/gone-2.xml`,
+      ]),
+      '/sitemap_index.xml': urlset(posts(origin, '/blog/', 4)),
+    }));
+
+    const result = await discoverBlog(server.origin, { fetcher, robotsAgent: 'TestBot' });
+
+    expect(result.sitemapUrls).toEqual([`${server.origin}/sitemap_index.xml`]);
+    expect(result.entries).toHaveLength(4);
+  });
+
+  it('does not treat /blogging-tools/ as part of a /blog hub', async () => {
+    const server = await site((origin) => ({
+      '/': html('<nav><a href="/blog">Blog</a></nav>'),
+      '/sitemap.xml': urlset([
+        ...posts(origin, '/blogging-tools/', 6),
+        ...posts(origin, '/blog/', 6),
+      ]),
+    }));
+
+    const result = await discoverBlog(server.origin, { fetcher, robotsAgent: 'TestBot' });
+
+    expect(result.entries.map((entry) => new URL(entry.url).pathname)).toEqual(
+      posts('', '/blog/', 6),
+    );
+  });
+
   it('keeps only blog URLs from a flat sitemap and flags robots-disallowed posts', async () => {
     const server = await site((origin) => ({
       '/': html('<header><a href="/blog/">Blog</a></header>'),
