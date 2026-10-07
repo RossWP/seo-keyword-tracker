@@ -7,6 +7,7 @@ import { createCrawlRunner } from './crawler/crawl-runner.js';
 import { requeueStaleCrawls } from './crawler/crawl.repository.js';
 import { createFetcher } from './crawler/fetcher.js';
 import { createDb } from './db/client.js';
+import { runMigrations } from './db/migrate.js';
 import { createPool } from './lib/db.js';
 import { createServices } from './services.js';
 
@@ -76,6 +77,8 @@ for (const signal of ['SIGINT', 'SIGTERM'] as const) {
   });
 }
 
+// Schema first: a fresh database (docker compose up, a clean clone) works without a manual step.
+await runMigrations(db);
 await app.listen({ host: config.host, port: config.port });
 void cleanupSessions();
 void resumeCrawls();
