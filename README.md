@@ -101,13 +101,19 @@ On the demo sites this picks `semrush.com/blog/sitemap/` and Yoast's `post-sitem
 
 `pnpm check` runs formatting, lint, typecheck and all tests. It needs the db container running.
 
-- **API (148 tests):** run against a real Postgres `<db>_test` database that is recreated on each run.
+- **API (151 tests):** run against a real Postgres `<db>_test` database that is recreated on each run.
   - Auth, isolation, validation and the HTTP contract of every route.
   - Time zone and DST ranges.
   - Discovery and crawl, against a local fixture HTTP server (no live sites).
   - Keyword and issue rules; the rank generator.
-- **Web (29 tests):** Testing Library with a fake API. Covers login, protected routes, URL-synced filters, the add-client form errors and the chart.
+- **Web (30 tests):** Testing Library with a fake API. Covers login, protected routes, URL-synced filters, the add-client form errors and the chart.
 - **Manual:** live discovery and seed on semrush.com and yoast.com.
+
+## Known weak spots
+
+- A recrawl doesn't remove pages that have dropped out of the sitemap's first 15. They stay, with their history, alongside the new ones.
+- Pages that robots.txt now disallows keep the keywords from their last successful crawl.
+- Keyword scores use IDF across the client's pages, so recrawling one page can change another page's keywords.
 
 ## What I'd do next
 
@@ -116,7 +122,7 @@ On the demo sites this picks `semrush.com/blog/sitemap/` and Yoast's `post-sitem
 - **More API instances:** a jobs table with leases.
 - **Crawling:** a headless browser for client-rendered sites (today they're only flagged); non-English stopwords.
 - **Time zone:** let the user change it in the UI.
-- **Security:** CSRF tokens in addition to the Origin check.
+- **Security:** CSRF tokens in addition to the Origin check (requests without an `Origin` header pass today; `SameSite=Lax` covers them). Login rate limit per IP as well as per IP+email, with `trustProxy` set behind nginx.
 - **Delivery:** CI running `pnpm check` and the Docker build; OpenAPI docs; e2e tests with Playwright.
 
 ## Time spent & AI usage
@@ -134,3 +140,9 @@ On the demo sites this picks `semrush.com/blog/sitemap/` and Yoast's `post-sitem
   - Live crawls of both sites.
   - Clicking through the UI in a desktop browser and at phone width.
   - A query plan check, which found the index sort-order mismatch.
+  - An independent review by a separate Claude agent that hadn't seen the build. It checked the code against the brief, and its findings led to these fixes:
+    - a failed recrawl no longer deletes a page's rank history;
+    - nested sitemap indexes are followed;
+    - a broken robots.txt sitemap falls back to the usual locations;
+    - `max-image-preview:none` is no longer reported as noindex;
+    - the page list refreshes when a crawl finishes.
