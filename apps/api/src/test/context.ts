@@ -34,6 +34,7 @@ export function createTestContext(
       logger: false,
       checkDatabase: options.checkDatabase ?? (() => Promise.resolve()),
       services,
+      db,
       cookies: { secure: false },
     });
   let app = build();

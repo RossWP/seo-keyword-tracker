@@ -10,17 +10,21 @@ import {
 import { registerErrorHandlers } from './lib/error-handler.js';
 import { registerSessionHooks, type CookieSettings } from './modules/auth/auth.plugin.js';
 import { authRoutes } from './modules/auth/auth.routes.js';
+import { clientRoutes } from './modules/clients/clients.routes.js';
 import { healthRoutes } from './modules/health/health.routes.js';
+import { pageRoutes } from './modules/pages/pages.routes.js';
+import type { Database } from './db/client.js';
 import type { Services } from './services.js';
 
 export interface AppDeps {
   logger: FastifyServerOptions['logger'];
   checkDatabase: () => Promise<void>;
   services: Services;
+  db: Database;
   cookies: CookieSettings;
 }
 
-export function buildApp({ logger, checkDatabase, services, cookies }: AppDeps) {
+export function buildApp({ logger, checkDatabase, services, db, cookies }: AppDeps) {
   const app = Fastify({
     logger,
     requestIdHeader: 'x-request-id',
@@ -43,6 +47,8 @@ export function buildApp({ logger, checkDatabase, services, cookies }: AppDeps) 
     async (api) => {
       registerSessionHooks(api, services.auth, cookies);
       await api.register(authRoutes(services.auth, cookies), { prefix: '/auth' });
+      await api.register(clientRoutes(db), { prefix: '/clients' });
+      await api.register(pageRoutes(db), { prefix: '/pages' });
     },
     { prefix: '/api' },
   );

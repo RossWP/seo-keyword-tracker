@@ -28,6 +28,7 @@ const app = buildApp({
     await pool.query('select 1');
   },
   services,
+  db,
   cookies: { secure: config.cookieSecure },
 });
 
