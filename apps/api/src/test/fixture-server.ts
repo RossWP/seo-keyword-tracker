@@ -32,6 +32,8 @@ export async function startFixtureServer(routes: Record<string, FixtureRoute>) {
   return {
     origin: `http://127.0.0.1:${port}`,
     hits,
+    /** The live route table: change it between requests to simulate a site changing. */
+    routes,
     close: () =>
       new Promise<void>((resolve) =>
         server.close(() => {

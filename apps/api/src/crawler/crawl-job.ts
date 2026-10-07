@@ -8,6 +8,7 @@ import { BOT_TOKEN } from './bot.js';
 import {
   claimCrawl,
   saveAnalysis,
+  saveFetchFailure,
   updateClientCrawl,
   upsertPage,
   type PageRow,
@@ -133,11 +134,10 @@ export async function crawlClient(
     }
     for (const item of fetched) {
       if (item.failure)
-        await saveAnalysis(
+        await saveFetchFailure(
           db,
           item.pageId,
-          [],
-          [fetchFailureIssue(item.failure.status, item.failure.reason)],
+          fetchFailureIssue(item.failure.status, item.failure.reason),
         );
     }
 

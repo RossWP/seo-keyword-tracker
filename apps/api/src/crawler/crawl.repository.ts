@@ -41,8 +41,8 @@ export async function upsertPage(db: Database, page: PageRow): Promise<string> {
 }
 
 /**
- * Replaces a page's keywords and issues in one transaction. Keyword pairs that survive a
- * re-crawl are updated in place, so their rank history is kept.
+ * Replaces a successfully fetched page's keywords and issues in one transaction. Keyword pairs
+ * that survive a re-crawl are updated in place, so their rank history is kept.
  */
 export async function saveAnalysis(
   db: Database,
@@ -90,19 +90,32 @@ export async function saveAnalysis(
           : eq(pageKeywords.pageId, pageId),
       );
 
-    await tx.delete(seoIssues).where(eq(seoIssues.pageId, pageId));
-    if (issues.length > 0) {
-      await tx.insert(seoIssues).values(
-        issues.map((found) => ({
-          pageId,
-          code: found.code,
-          severity: found.severity,
-          message: found.message,
-          details: found.details ?? null,
-        })),
-      );
-    }
+    await writeIssues(tx, pageId, issues);
   });
+}
+
+/**
+ * A page that could not be fetched this time: only its issues are replaced. Its keywords stay,
+ * because deleting them would cascade to their rank history over a temporary outage.
+ */
+export async function saveFetchFailure(db: Database, pageId: string, issue: SeoIssue) {
+  await db.transaction((tx) => writeIssues(tx, pageId, [issue]));
+}
+
+type Transaction = Parameters<Parameters<Database['transaction']>[0]>[0];
+
+async function writeIssues(tx: Transaction, pageId: string, issues: SeoIssue[]) {
+  await tx.delete(seoIssues).where(eq(seoIssues.pageId, pageId));
+  if (issues.length === 0) return;
+  await tx.insert(seoIssues).values(
+    issues.map((found) => ({
+      pageId,
+      code: found.code,
+      severity: found.severity,
+      message: found.message,
+      details: found.details ?? null,
+    })),
+  );
 }
 
 /**

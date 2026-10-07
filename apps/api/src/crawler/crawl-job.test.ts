@@ -163,6 +163,38 @@ describe('crawlClient', () => {
     expect(after.map((row) => row.id).sort()).toEqual(before.map((row) => row.id).sort());
     expect(await context.db.select().from(pages)).toHaveLength(4);
   });
+
+  it('keeps keywords and history of a page that fails on re-crawl, and flags the failure', async () => {
+    const site = await blogSite();
+    const client = await createClient(site.origin);
+    await crawlClient(client.id, deps());
+    const [page] = await context.db
+      .select({ id: pages.id })
+      .from(pages)
+      .where(eq(pages.url, `${site.origin}/blog/link-building-guide/`));
+    if (!page) throw new Error('page not crawled');
+    const keywordsOf = () =>
+      context.db
+        .select({ id: pageKeywords.id })
+        .from(pageKeywords)
+        .where(eq(pageKeywords.pageId, page.id));
+    const before = await keywordsOf();
+    expect(before.length).toBeGreaterThan(0);
+
+    site.routes['/blog/link-building-guide/'] = { status: 503, body: 'down' };
+    await context.db
+      .update(clients)
+      .set({ crawlStatus: 'pending' })
+      .where(eq(clients.id, client.id));
+    await crawlClient(client.id, deps());
+
+    expect(await keywordsOf()).toEqual(before);
+    const issues = await context.db
+      .select({ code: seoIssues.code })
+      .from(seoIssues)
+      .where(eq(seoIssues.pageId, page.id));
+    expect(issues).toEqual([{ code: 'http_error' }]);
+  });
 });
 
 describe('crawl runner and restarts', () => {
