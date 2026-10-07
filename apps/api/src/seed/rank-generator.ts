@@ -49,7 +49,9 @@ export function generateSeries(seedKey: string, rankOrder: number, dates: string
     const ranked = random() >= NOT_RANKING_CHANCE;
     return {
       snapshotDate,
-      capturedAt: new Date(`${snapshotDate}T0${CAPTURE_HOUR_UTC}:${CAPTURE_MINUTE_UTC}:00Z`),
+      capturedAt: new Date(
+        `${snapshotDate}T${pad(CAPTURE_HOUR_UTC)}:${pad(CAPTURE_MINUTE_UTC)}:00Z`,
+      ),
       position: ranked ? Math.round(position) : null,
     };
   });
@@ -79,3 +81,5 @@ function mulberry32(seed: number): () => number {
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
 }
+
+const pad = (value: number) => String(value).padStart(2, '0');

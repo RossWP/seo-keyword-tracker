@@ -70,7 +70,9 @@ try {
     throw new Error(`Only ${total} snapshots exist; expected at least ${MIN_SNAPSHOTS}`);
   }
 
-  console.log('\nSeed complete. Sign in at http://localhost:5173 with:');
+  console.log(
+    '\nSeed complete. Sign in at http://localhost:5173 (dev) or http://localhost:8080 (Docker) with:',
+  );
   for (const { email } of DEMO_USERS) console.log(`  ${email} / ${env.SEED_PASSWORD}`);
 } catch (error) {
   log.error({ err: error }, 'seed failed');

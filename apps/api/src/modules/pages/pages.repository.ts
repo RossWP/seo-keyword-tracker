@@ -87,7 +87,7 @@ export async function listPages(db: Database, filter: PageListFilter): Promise<P
       ), '[]'::json) as keywords
     from pages p join clients c on c.id = p.client_id
     where ${listWhere(filter)}
-    order by c.name, c.id, p.sitemap_position
+    order by c.name, c.id, p.sitemap_position, p.id
     limit ${filter.limit} offset ${filter.offset}`);
   // Raw SQL with json_agg: the row shape is checked here rather than trusted.
   return z.array(pageListRow).parse(result.rows);
