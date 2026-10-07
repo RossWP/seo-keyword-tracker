@@ -26,13 +26,33 @@ const issue = (
 const TITLE_RANGE = { min: 30, max: 60 };
 const THIN_CONTENT_WORDS = 300;
 
+/** Directives that carry a value after a colon, so "name: value" is not an agent prefix. */
+const VALUE_DIRECTIVES = new Set([
+  'max-snippet',
+  'max-image-preview',
+  'max-video-preview',
+  'unavailable_after',
+]);
+/** Agent-specific directives count when they address the search engines that matter here. */
+const SEARCH_AGENTS = new Set(['googlebot', 'bingbot']);
+
 /**
- * Robots directives are comma-separated; "none" means noindex,nofollow. Splitting on spaces too
- * handles "googlebot: noindex" while leaving values like "max-image-preview:none" whole.
+ * Robots directives are comma-separated; "none" means noindex,nofollow. A directive can be
+ * scoped to one crawler ("googlebot: noindex"); one aimed at some other bot is ignored.
  */
 function blocksIndexing(robots: string): boolean {
-  const directives = robots.toLowerCase().split(/[\s,]+/);
-  return directives.includes('noindex') || directives.includes('none');
+  return robots
+    .toLowerCase()
+    .split(',')
+    .some((part) => {
+      let directive = part.trim();
+      const scoped = /^([\w-]+)\s*:\s*(.+)$/.exec(directive);
+      if (scoped?.[1] && scoped[2] && !VALUE_DIRECTIVES.has(scoped[1])) {
+        if (!SEARCH_AGENTS.has(scoped[1])) return false;
+        directive = scoped[2].trim();
+      }
+      return directive === 'noindex' || directive === 'none';
+    });
 }
 
 /** Each rule is a pure function of the page (and its siblings), so each is testable alone. */

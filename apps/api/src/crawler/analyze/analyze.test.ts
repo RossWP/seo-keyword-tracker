@@ -188,6 +188,9 @@ describe('findIssues', () => {
         '<html><head><meta name="robots" content="index,max-image-preview:none"></head></html>',
       ),
     ).not.toContain('noindex');
+    expect(codes('<html></html>', 'https://a.example/x/', 'otherbot: noindex')).not.toContain(
+      'noindex',
+    );
   });
 
   it('flags title length, multiple H1s, canonical elsewhere, thin content and image alts', () => {
