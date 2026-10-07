@@ -1,4 +1,5 @@
 import { Link, Outlet } from 'react-router';
+import { UserMenu } from '../features/auth/user-menu';
 import { ApiStatus } from '../features/status/api-status';
 
 export function AppLayout() {
@@ -9,7 +10,10 @@ export function AppLayout() {
           <Link to="/" className="font-semibold tracking-tight">
             SEO Keyword Tracker
           </Link>
-          <ApiStatus />
+          <div className="flex items-center gap-6">
+            <ApiStatus />
+            <UserMenu />
+          </div>
         </div>
       </header>
       <main className="mx-auto max-w-6xl px-4 py-8">
