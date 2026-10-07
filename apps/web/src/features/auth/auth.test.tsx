@@ -96,6 +96,68 @@ describe('sign out', () => {
   });
 });
 
+describe('switching users', () => {
+  it("never shows the previous user's cached data after their session expires", async () => {
+    const bob = { ...alice, id: '5d0c4c7a-8a43-4c8f-a3b4-0d6a1f8e2c19', email: 'bob@agency.test' };
+    let current: typeof alice | null = alice;
+    const clientOf = (name: string) => ({
+      id: name === 'Semrush' ? 'c1' : 'c2',
+      name,
+      websiteUrl: `https://${name.toLowerCase()}.example/`,
+      crawlStatus: 'done',
+      crawlErrorCode: null,
+      crawlErrorMessage: null,
+      pagesTotal: 1,
+      pagesDone: 1,
+      sitemapUrl: null,
+      createdAt: '2026-10-07T10:00:00.000Z',
+      crawlFinishedAt: null,
+    });
+    const pageOf = (name: string) => ({
+      id: name === 'Semrush' ? 'p1' : 'p2',
+      url: `https://${name.toLowerCase()}.example/blog/post/`,
+      title: `${name} post`,
+      fetchStatus: 'ok',
+      client: { id: name === 'Semrush' ? 'c1' : 'c2', name },
+      issueCount: 0,
+      errorCount: 0,
+      bestPosition: null,
+      keywords: [],
+    });
+    const unauthorized = () => apiError(401, 'unauthorized', 'Sign in to continue');
+    const name = () => (current === alice ? 'Semrush' : 'Yoast');
+    fakeApi({
+      'GET /api/auth/me': () => (current ? json(200, { user: current }) : unauthorized()),
+      'POST /api/auth/login': () => {
+        current = bob;
+        return json(200, { user: bob });
+      },
+      'GET /api/clients': () =>
+        current ? json(200, { items: [clientOf(name())] }) : unauthorized(),
+      'GET /api/pages': () =>
+        current
+          ? json(200, { items: [pageOf(name())], page: 1, pageSize: 20, total: 1 })
+          : unauthorized(),
+      'GET /api/pages/p1': () =>
+        current ? apiError(404, 'not_found', 'Page not found') : unauthorized(),
+    });
+    const { router } = renderRoute('/');
+    expect(await screen.findByRole('link', { name: 'Semrush post' })).toBeInTheDocument();
+
+    // Alice's session expires; the next request answers 401 and the app asks for a sign-in.
+    current = null;
+    await router.navigate('/pages/p1');
+    expect(await screen.findByRole('heading', { name: 'Sign in' })).toBeInTheDocument();
+
+    await signIn('bob@agency.test', 'demo-password');
+    expect(await screen.findByText('bob@agency.test')).toBeInTheDocument();
+    await router.navigate('/');
+
+    expect(await screen.findByRole('link', { name: 'Yoast post' })).toBeInTheDocument();
+    expect(screen.queryByText(/Semrush/)).not.toBeInTheDocument();
+  });
+});
+
 describe('safeReturnTo', () => {
   it.each([
     [null, '/'],

@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { z } from 'zod';
 import { apiRequest, isApiError } from '../../api/client';
 
@@ -32,6 +32,9 @@ export function useLogin() {
     mutationFn: (credentials: { email: string; password: string }) =>
       apiRequest('/auth/login', userResponse, { method: 'POST', body: credentials }),
     onSuccess: ({ user }) => {
+      // A session that expired leaves the previous user's answers in the cache; whoever signs
+      // in next must never see them, even for a moment.
+      removeUserData(queryClient);
       queryClient.setQueryData(sessionQueryKey, user);
     },
   });
@@ -45,9 +48,14 @@ export function useLogout() {
       // Signing out flips the session to null (RequireAuth then shows login) and drops
       // every cached answer that belonged to this user.
       queryClient.setQueryData(sessionQueryKey, null);
-      queryClient.removeQueries({
-        predicate: ({ queryKey: [key] }) => key !== sessionQueryKey[0] && key !== 'health',
-      });
+      removeUserData(queryClient);
     },
+  });
+}
+
+/** Drops every cached answer that belongs to a user (all but the session and API health). */
+function removeUserData(queryClient: QueryClient): void {
+  queryClient.removeQueries({
+    predicate: ({ queryKey: [key] }) => key !== sessionQueryKey[0] && key !== 'health',
   });
 }
