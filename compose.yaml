@@ -26,6 +26,8 @@ services:
       DATABASE_URL: postgres://${POSTGRES_USER:-tracker}:${POSTGRES_PASSWORD:-tracker}@db:5432/${POSTGRES_DB:-tracker}
       # Plain http on localhost; behind HTTPS in production this stays at its default (true).
       COOKIE_SECURE: 'false'
+      # Only nginx (the web service, on the private Docker network) can reach the API.
+      TRUST_PROXY: uniquelocal
       SEED_PASSWORD: ${SEED_PASSWORD:-demo-password}
     depends_on:
       db: { condition: service_healthy }

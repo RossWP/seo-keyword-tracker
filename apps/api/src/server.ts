@@ -35,6 +35,7 @@ const app = buildApp({
     crawler.enqueue(clientId);
   },
   cookies: { secure: config.cookieSecure },
+  trustProxy: config.trustProxy,
 });
 
 const fetcher = createFetcher({ userAgent: BOT_USER_AGENT });

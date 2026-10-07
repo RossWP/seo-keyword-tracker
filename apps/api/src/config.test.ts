@@ -10,6 +10,7 @@ describe('loadConfig', () => {
       logLevel: 'info',
       databaseUrl: 'postgres://tracker:tracker@localhost:5433/tracker',
       cookieSecure: false,
+      trustProxy: undefined,
     });
   });
 

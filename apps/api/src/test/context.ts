@@ -25,7 +25,7 @@ const START = new Date('2026-10-07T12:00:00Z');
  * call `reset()` in beforeEach and `close()` in afterAll.
  */
 export function createTestContext(
-  options: { checkDatabase?: () => Promise<void> } = {},
+  options: { checkDatabase?: () => Promise<void>; trustProxy?: string } = {},
 ): TestContext {
   const pool = new pg.Pool({ connectionString: testDatabaseUrl(), max: 4 });
   const db = createDb(pool);
@@ -40,6 +40,7 @@ export function createTestContext(
       db,
       enqueueCrawl: (clientId: string) => enqueued.push(clientId),
       cookies: { secure: false },
+      trustProxy: options.trustProxy,
     });
   let app = build();
 

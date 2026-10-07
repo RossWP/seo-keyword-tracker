@@ -15,6 +15,10 @@ const envSchema = z.object({
   DATABASE_URL: z.url({ protocol: /^postgres(ql)?$/ }).optional(),
   // Defaults to true in production; false locally because dev runs over plain http.
   COOKIE_SECURE: z.enum(['true', 'false']).optional(),
+  // Addresses of reverse proxies in front of the API, as IPs, CIDRs or the names loopback,
+  // linklocal, uniquelocal (nginx in Docker: uniquelocal). Their X-Forwarded-For gives the client
+  // IP used by the login rate limit. Unset trusts no proxy, so the header can't be spoofed.
+  TRUST_PROXY: z.string().trim().min(1).optional(),
 });
 
 type Env = z.infer<typeof envSchema>;
@@ -26,6 +30,7 @@ export interface Config {
   logLevel: Env['LOG_LEVEL'];
   databaseUrl: string;
   cookieSecure: boolean;
+  trustProxy: string | undefined;
 }
 
 export function loadConfig(source: NodeJS.ProcessEnv = process.env): Config {
@@ -41,6 +46,7 @@ export function loadConfig(source: NodeJS.ProcessEnv = process.env): Config {
     logLevel: env.LOG_LEVEL,
     databaseUrl: env.DATABASE_URL ?? localDatabaseUrl(env),
     cookieSecure: env.COOKIE_SECURE ? env.COOKIE_SECURE === 'true' : env.NODE_ENV === 'production',
+    trustProxy: env.TRUST_PROXY,
   };
 }
 

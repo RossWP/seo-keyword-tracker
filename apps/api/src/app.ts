@@ -24,12 +24,23 @@ export interface AppDeps {
   /** Schedules a background crawl; the crawl state itself is stored on the client row. */
   enqueueCrawl: (clientId: string) => void;
   cookies: CookieSettings;
+  /** Trusted reverse proxy addresses; without them X-Forwarded-For is ignored. */
+  trustProxy?: string;
 }
 
-export function buildApp({ logger, checkDatabase, services, db, enqueueCrawl, cookies }: AppDeps) {
+export function buildApp({
+  logger,
+  checkDatabase,
+  services,
+  db,
+  enqueueCrawl,
+  cookies,
+  trustProxy,
+}: AppDeps) {
   const app = Fastify({
     logger,
     requestIdHeader: 'x-request-id',
+    trustProxy: trustProxy ?? false,
   }).withTypeProvider<ZodTypeProvider>();
 
   app.setValidatorCompiler(validatorCompiler);
