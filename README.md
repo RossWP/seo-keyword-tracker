@@ -20,9 +20,11 @@ exact version pinned in `package.json` on its own).
 ```bash
 pnpm install
 docker compose up -d --wait db   # Postgres 18 on localhost:5433, ready when the command returns
+pnpm db:migrate                  # apply database migrations
 pnpm dev                         # web on http://localhost:5173, API on http://localhost:3000
-pnpm check                       # format check, lint, typecheck, tests
+pnpm check                       # format check, lint, typecheck, tests (needs the db running)
 ```
 
 Settings live in `.env` (optional; copy from `.env.example`). Reset the database with
-`docker compose down -v`.
+`docker compose down -v`. Tests use a separate `<POSTGRES_DB>_test` database on the same server,
+recreated on every run.
