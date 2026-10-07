@@ -76,6 +76,35 @@ describe('pages list', () => {
     expect(await screen.findByText(/Crawling Acme: 7 of 15 pages/)).toBeInTheDocument();
   });
 
+  it('refreshes the list when a running crawl finishes', async () => {
+    let crawlDone = false;
+    fakeApi({
+      ...signedInAs(),
+      'GET /api/clients': () =>
+        json(200, {
+          items: clients.items.map((client) =>
+            client.id === 'c2' && crawlDone
+              ? { ...client, crawlStatus: 'done', pagesDone: 15 }
+              : client,
+          ),
+        }),
+      'GET /api/pages': () =>
+        json(200, {
+          items: crawlDone ? [page(1), page(2)] : [page(1)],
+          page: 1,
+          pageSize: 20,
+          total: crawlDone ? 2 : 1,
+        }),
+    });
+    renderRoute('/');
+    expect(await screen.findByText(/Crawling Acme/)).toBeInTheDocument();
+
+    crawlDone = true;
+    // The clients poll runs every 3 s while a crawl is in progress.
+    expect(await screen.findByRole('link', { name: 'Post 2' }, { timeout: 5_000 })).toBeVisible();
+    expect(screen.queryByText(/Crawling Acme/)).not.toBeInTheDocument();
+  }, 10_000);
+
   it('keeps search, client filter and page in the URL and sends them to the API', async () => {
     const requests = pagesApi(() => ({ items: [page(1)], page: 1, pageSize: 20, total: 45 }));
     const { router } = renderRoute('/');

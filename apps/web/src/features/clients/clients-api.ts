@@ -33,12 +33,27 @@ export const isCrawling = (status: CrawlStatus): boolean =>
 
 export const clientsQueryKey = ['clients'] as const;
 
-/** The user's clients; polls every 3 s only while one of them is being crawled. */
+/**
+ * The user's clients; polls every 3 s only while one of them is being crawled. When a crawl
+ * finishes, cached page lists are refreshed so its new pages show up without a reload.
+ */
 export function useClients() {
+  const queryClient = useQueryClient();
   return useQuery({
     queryKey: clientsQueryKey,
-    queryFn: async ({ signal }) =>
-      (await apiRequest('/clients', z.object({ items: z.array(clientSchema) }), { signal })).items,
+    queryFn: async ({ signal }) => {
+      const previous = queryClient.getQueryData<Client[]>(clientsQueryKey) ?? [];
+      const { items } = await apiRequest('/clients', z.object({ items: z.array(clientSchema) }), {
+        signal,
+      });
+      const finished = previous.some(
+        (before) =>
+          isCrawling(before.crawlStatus) &&
+          items.some((now) => now.id === before.id && !isCrawling(now.crawlStatus)),
+      );
+      if (finished) void queryClient.invalidateQueries({ queryKey: ['pages'] });
+      return items;
+    },
     refetchInterval: (query) =>
       query.state.status !== 'error' &&
       query.state.data?.some((client) => isCrawling(client.crawlStatus))
@@ -69,7 +84,8 @@ export function useRecrawl() {
 
 /** Plain-language reasons for each crawl failure code. */
 export const CRAWL_ERRORS: Record<string, string> = {
-  no_sitemap: 'No sitemap was found: robots.txt lists none and the usual locations are missing.',
+  no_sitemap:
+    'No sitemap was found: none listed in robots.txt works and the usual locations are missing.',
   no_blog_found: 'Sitemaps were found, but none of them lists blog posts.',
   blocked_by_site: 'The site refused the crawler (for example bot protection or rate limiting).',
   site_unreachable: 'The website did not respond or returned an error.',
