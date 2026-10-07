@@ -23,7 +23,6 @@ docker compose up -d --build --wait
 docker compose exec api node dist/seed/seed.js
 ```
 
-Then open http://localhost:8080.
 
 | Account             | Password        | Client      |
 | ------------------- | --------------- | ----------- |
@@ -127,14 +126,14 @@ On the demo sites this picks `semrush.com/blog/sitemap/` and Yoast's `post-sitem
 
 ## Time spent & AI usage
 
-- **Time:** about **TODO** hours, against a 5-hour budget.
+- **Time:** about 5 hours.
 - **Tools:** Claude (Claude Code, Opus).
 - **What it produced:** most of the code, the tests and this README, slice by slice from a plan I approved.
 - **What I decided and changed:**
   - I set the stack, scope and cut list.
   - I reviewed every change before committing it.
   - I ran the real crawls; their results led to the keyword phrase rules and the brand filter.
-  - Version pins: pnpm 12, because pnpm 11 has no darwin-x64 binary; TypeScript 6, for typescript-eslint.
+  - Version pins: TypeScript 6, because typescript-eslint does not support TypeScript 7 yet.
 - **How I checked it:**
   - The test suite above.
   - Live crawls of both sites.
