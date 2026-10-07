@@ -1,4 +1,4 @@
-import { and, eq } from 'drizzle-orm';
+import { and, count, eq } from 'drizzle-orm';
 import { pino } from 'pino';
 import { z } from 'zod';
 import { loadConfig } from '../config.js';
@@ -7,7 +7,7 @@ import { crawlClient } from '../crawler/crawl-job.js';
 import { createFetcher } from '../crawler/fetcher.js';
 import { createDb, type Database } from '../db/client.js';
 import { runMigrations } from '../db/migrate.js';
-import { clients, pages } from '../db/schema.js';
+import { clients, pageKeywords, pages } from '../db/schema.js';
 import { createPool } from '../lib/db.js';
 import { hashPassword } from '../lib/passwords.js';
 import { parseWebsiteUrl } from '../lib/url.js';
@@ -41,8 +41,10 @@ try {
 
   // 2. One client each, crawled with the same code path as "Add client" in the app.
   const fetcher = createFetcher({ userAgent: BOT_USER_AGENT });
+  const demoClients: { id: string; name: string }[] = [];
   for (const { email, client } of DEMO_USERS) {
     const id = await ensureClient(db, userIds.get(email) ?? '', client);
+    demoClients.push({ id, name: client.name });
     const [current] = await db.select().from(clients).where(eq(clients.id, id));
     const crawled = current?.crawlStatus === 'done' || current?.crawlStatus === 'partial';
     if (crawled && !recrawl) {
@@ -53,6 +55,18 @@ try {
     await db.update(clients).set({ crawlStatus: 'pending' }).where(eq(clients.id, id));
     await crawlClient(id, { db, fetcher, now: () => new Date(), log });
     await logCrawlSummary(db, id, client.name);
+  }
+
+  // Both demo accounts must have something to show; 50k rows from one client alone would hide
+  // a failed crawl of the other.
+  for (const { id, name } of demoClients) {
+    if ((await countClientKeywords(db, id)) === 0) {
+      const [client] = await db.select().from(clients).where(eq(clients.id, id));
+      throw new Error(
+        `${name} has no keywords (crawl ${client?.crawlStatus ?? 'missing'}: ${client?.crawlErrorMessage ?? 'no pages analysed'}). ` +
+          'Check the site is reachable and run `pnpm seed --recrawl`.',
+      );
+    }
   }
 
   // 3. Rank history for every page–keyword pair of every user, including clients added in the app.
@@ -119,4 +133,13 @@ async function logCrawlSummary(database: Database, clientId: string, name: strin
   if (client?.crawlStatus === 'failed')
     log.warn(summary, `crawl failed: ${client.crawlErrorMessage ?? ''}`);
   else log.info(summary, 'crawl finished');
+}
+
+async function countClientKeywords(database: Database, clientId: string): Promise<number> {
+  const [row] = await database
+    .select({ total: count() })
+    .from(pageKeywords)
+    .innerJoin(pages, eq(pages.id, pageKeywords.pageId))
+    .where(eq(pages.clientId, clientId));
+  return row?.total ?? 0;
 }
