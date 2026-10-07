@@ -20,7 +20,7 @@ exact version pinned in `package.json` on its own).
 ```bash
 pnpm install
 docker compose up -d --wait db   # Postgres 18 on localhost:5433, ready when the command returns
-pnpm dev                         # API on http://localhost:3000 (GET /health)
+pnpm dev                         # web on http://localhost:5173, API on http://localhost:3000
 pnpm check                       # format check, lint, typecheck, tests
 ```
 

@@ -2,6 +2,7 @@ import js from '@eslint/js';
 import { defineConfig } from 'eslint/config';
 import prettier from 'eslint-config-prettier';
 import globals from 'globals';
+import reactHooks from 'eslint-plugin-react-hooks';
 import tseslint from 'typescript-eslint';
 
 export default defineConfig(
@@ -28,6 +29,10 @@ export default defineConfig(
       // Fastify route handlers and plugins are async by contract, even when they don't await.
       '@typescript-eslint/require-await': 'off',
     },
+  },
+  {
+    files: ['apps/web/src/**/*.{ts,tsx}'],
+    extends: [reactHooks.configs.flat['recommended-latest']],
   },
   {
     files: ['**/*.js'],
