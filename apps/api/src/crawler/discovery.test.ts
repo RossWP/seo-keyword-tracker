@@ -139,6 +139,35 @@ describe('discoverBlog', () => {
     expect(result.entries).toHaveLength(4);
   });
 
+  it('follows nested sitemap indexes', async () => {
+    const server = await site((origin) => ({
+      '/': html('<nav><a href="/blog/">Blog</a></nav>'),
+      '/robots.txt': { type: 'text/plain', body: `Sitemap: ${origin}/sitemap.xml\n` },
+      '/sitemap.xml': index([`${origin}/sitemaps/content.xml`, `${origin}/sitemaps/pages.xml`]),
+      '/sitemaps/content.xml': index([`${origin}/sitemaps/blog-posts.xml`]),
+      '/sitemaps/pages.xml': urlset([`${origin}/about/`, `${origin}/pricing/`]),
+      '/sitemaps/blog-posts.xml': urlset(posts(origin, '/blog/', 5)),
+    }));
+
+    const result = await discoverBlog(server.origin, { fetcher, robotsAgent: 'TestBot' });
+
+    expect(result.sitemapUrls).toEqual([`${server.origin}/sitemaps/blog-posts.xml`]);
+    expect(result.entries).toHaveLength(5);
+  });
+
+  it('tries conventional locations when the sitemaps in robots.txt are broken', async () => {
+    const server = await site((origin) => ({
+      '/': html('<nav><a href="/blog/">Blog</a></nav>'),
+      '/robots.txt': { type: 'text/plain', body: `Sitemap: ${origin}/old-sitemap.xml\n` },
+      '/sitemap.xml': urlset(posts(origin, '/blog/', 3)),
+    }));
+
+    const result = await discoverBlog(server.origin, { fetcher, robotsAgent: 'TestBot' });
+
+    expect(result.sitemapUrls).toEqual([`${server.origin}/sitemap.xml`]);
+    expect(result.entries).toHaveLength(3);
+  });
+
   it('keeps only blog URLs from a flat sitemap and flags robots-disallowed posts', async () => {
     const server = await site((origin) => ({
       '/': html('<header><a href="/blog/">Blog</a></header>'),

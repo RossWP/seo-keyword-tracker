@@ -123,11 +123,11 @@ export async function discoverBlog(
   if (candidates.size === 0) {
     throw new CrawlError(
       'no_sitemap',
-      `No sitemap found: robots.txt lists none on this site and ${CONVENTIONAL_SITEMAPS.join(', ')} are missing`,
+      `No sitemap found: none listed in robots.txt works, and ${CONVENTIONAL_SITEMAPS.join(', ')} are missing`,
     );
   }
 
-  const families = await scoreFamilies(candidates, hubUrl, fetcher);
+  const families = await scoreFamilies(candidates, hubUrl, origin, fetcher);
   const best = families[0];
   const urls = best ? await familyUrls(best, fetcher, limit) : [];
   const posts = selectPosts(urls, origin, hubUrl, limit);
@@ -208,8 +208,8 @@ interface Candidate {
 }
 
 /**
- * Sitemap URLs worth judging: robots.txt entries (same site only) or, failing that, the
- * conventional locations. Indexes are expanded into their children without fetching them yet.
+ * Sitemap URLs worth judging: robots.txt entries (same site only) or, when none of them works,
+ * the conventional locations. Indexes are expanded into their children without fetching them yet.
  */
 async function collectCandidates(
   origin: string,
@@ -217,19 +217,28 @@ async function collectCandidates(
   fetcher: Fetcher,
 ): Promise<Map<string, Candidate>> {
   const candidates = new Map<string, Candidate>();
-  const fromRobots = robotsSitemaps.filter((url) => isHttpUrl(url) && isSameSite(url, origin));
-  const entries =
-    fromRobots.length > 0 ? fromRobots : CONVENTIONAL_SITEMAPS.map((path) => origin + path);
-
   let fetches = 0;
-  for (const url of entries) {
-    if (fetches >= MAX_SITEMAP_FETCHES) break;
-    const document = await tryReadSitemap(url, fetcher, SAMPLE_SIZE);
-    fetches++;
-    if (!document) continue;
-    addDocument(candidates, { url, depth: 0, document }, origin);
-    // Conventional paths are guesses: the first one that works is enough.
-    if (fromRobots.length === 0) break;
+  const tryAll = async (urls: string[], stopAtFirst: boolean) => {
+    for (const url of urls) {
+      if (fetches >= MAX_SITEMAP_FETCHES) return;
+      const document = await tryReadSitemap(url, fetcher, SAMPLE_SIZE);
+      fetches++;
+      if (!document) continue;
+      addDocument(candidates, { url, depth: 0, document }, origin);
+      if (stopAtFirst) return;
+    }
+  };
+
+  await tryAll(
+    robotsSitemaps.filter((url) => isHttpUrl(url) && isSameSite(url, origin)),
+    false,
+  );
+  // Conventional paths are guesses: the first one that works is enough.
+  if (candidates.size === 0) {
+    await tryAll(
+      CONVENTIONAL_SITEMAPS.map((path) => origin + path),
+      true,
+    );
   }
   return candidates;
 }
@@ -280,6 +289,7 @@ interface Family {
 async function scoreFamilies(
   candidates: Map<string, Candidate>,
   hubUrl: string | null,
+  origin: string,
   fetcher: Fetcher,
 ): Promise<Family[]> {
   const hubPath = hubUrl ? new URL(hubUrl).pathname.toLowerCase() : null;
@@ -296,14 +306,24 @@ async function scoreFamilies(
     .slice(0, CANDIDATES_TO_SAMPLE);
 
   const families: Family[] = [];
+  let expanded = false;
   for (const { members, prior } of ranked) {
     const first = candidates.get(members[0] ?? '');
     if (!first) continue;
     first.document ??= (await tryReadSitemap(first.url, fetcher, SAMPLE_SIZE)) ?? undefined;
-    if (!first.document || first.document.kind === 'index') continue;
+    if (!first.document) continue;
+    if (first.document.kind === 'index') {
+      // An index inside an index: its children replace it and the ranking runs again. Documents
+      // already read stay on their candidates, so nothing is fetched twice.
+      candidates.delete(first.url);
+      addDocument(candidates, first, origin);
+      expanded = true;
+      continue;
+    }
     const sample = first.document.urls;
     families.push({ members, sample, score: prior + contentScore(sample, hubUrl, hubPath) });
   }
+  if (expanded) return scoreFamilies(candidates, hubUrl, origin, fetcher);
   return families.sort((a, b) => b.score - a.score);
 }
 
