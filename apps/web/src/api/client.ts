@@ -61,3 +61,20 @@ export async function apiRequest<T>(
 
 export const isApiError = (error: unknown, status?: number): error is ApiError =>
   error instanceof ApiError && (status === undefined || error.status === status);
+
+const fieldIssues = z.object({
+  issues: z.array(z.object({ path: z.string(), message: z.string() })),
+});
+
+/** Server validation errors keyed by form field ("body.websiteUrl" → "websiteUrl"). */
+export function fieldErrors(error: unknown): Record<string, string> {
+  if (!(error instanceof ApiError) || error.status !== 400) return {};
+  const parsed = fieldIssues.safeParse(error.details);
+  if (!parsed.success) return {};
+  const result: Record<string, string> = {};
+  for (const { path, message } of parsed.data.issues) {
+    const field = path.replace(/^body\./, '');
+    result[field] ??= message;
+  }
+  return result;
+}

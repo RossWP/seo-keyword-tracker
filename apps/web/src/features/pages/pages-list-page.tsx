@@ -197,9 +197,17 @@ function EmptyState({
   }
   return (
     <p className="text-slate-600">
-      {noClients
-        ? 'No clients yet. Add a client to start tracking its blog.'
-        : 'No pages crawled yet.'}
+      {noClients ? (
+        <>
+          No clients yet.{' '}
+          <Link to="/clients/new" className="text-blue-700 underline">
+            Add a client
+          </Link>{' '}
+          to start tracking its blog.
+        </>
+      ) : (
+        'No pages crawled yet.'
+      )}
     </p>
   );
 }

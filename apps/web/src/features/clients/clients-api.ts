@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { z } from 'zod';
 import { apiRequest } from '../../api/client';
 
@@ -46,3 +46,37 @@ export function useClients() {
         : false,
   });
 }
+
+export function useCreateClient() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (values: { name: string; websiteUrl: string }) =>
+      apiRequest('/clients', clientSchema, { method: 'POST', body: values }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: clientsQueryKey }),
+  });
+}
+
+export function useRecrawl() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (clientId: string) =>
+      apiRequest(`/clients/${encodeURIComponent(clientId)}/recrawl`, clientSchema, {
+        method: 'POST',
+      }),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: clientsQueryKey }),
+  });
+}
+
+/** Plain-language reasons for each crawl failure code. */
+export const CRAWL_ERRORS: Record<string, string> = {
+  no_sitemap: 'No sitemap was found: robots.txt lists none and the usual locations are missing.',
+  no_blog_found: 'Sitemaps were found, but none of them lists blog posts.',
+  blocked_by_site: 'The site refused the crawler (for example bot protection or rate limiting).',
+  site_unreachable: 'The website did not respond or returned an error.',
+  timeout: 'The website took too long to respond.',
+  blocked_host: 'The address points to a private or internal network.',
+  too_large: 'A response was too large to process.',
+  too_many_redirects: 'The website redirects in a loop.',
+  invalid_url: 'The website address is not valid.',
+  internal_error: 'Something went wrong on our side while crawling.',
+};
