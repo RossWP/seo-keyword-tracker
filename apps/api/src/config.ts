@@ -13,6 +13,8 @@ const envSchema = z.object({
   POSTGRES_PORT: port.default(5433),
   // Overrides the URL built from POSTGRES_* (Docker network, tests, hosted databases).
   DATABASE_URL: z.url({ protocol: /^postgres(ql)?$/ }).optional(),
+  // Defaults to true in production; false locally because dev runs over plain http.
+  COOKIE_SECURE: z.enum(['true', 'false']).optional(),
 });
 
 type Env = z.infer<typeof envSchema>;
@@ -23,6 +25,7 @@ export interface Config {
   port: number;
   logLevel: Env['LOG_LEVEL'];
   databaseUrl: string;
+  cookieSecure: boolean;
 }
 
 export function loadConfig(source: NodeJS.ProcessEnv = process.env): Config {
@@ -37,6 +40,7 @@ export function loadConfig(source: NodeJS.ProcessEnv = process.env): Config {
     port: env.PORT,
     logLevel: env.LOG_LEVEL,
     databaseUrl: env.DATABASE_URL ?? localDatabaseUrl(env),
+    cookieSecure: env.COOKIE_SECURE ? env.COOKIE_SECURE === 'true' : env.NODE_ENV === 'production',
   };
 }
 

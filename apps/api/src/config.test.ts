@@ -9,6 +9,7 @@ describe('loadConfig', () => {
       port: 3000,
       logLevel: 'info',
       databaseUrl: 'postgres://tracker:tracker@localhost:5433/tracker',
+      cookieSecure: false,
     });
   });
 
@@ -28,6 +29,11 @@ describe('loadConfig', () => {
       DATABASE_URL: 'postgres://tracker:tracker@db:5432/tracker',
     });
     expect(config.databaseUrl).toBe('postgres://tracker:tracker@db:5432/tracker');
+  });
+
+  it('uses secure cookies in production unless told otherwise', () => {
+    expect(loadConfig({ NODE_ENV: 'production' }).cookieSecure).toBe(true);
+    expect(loadConfig({ NODE_ENV: 'production', COOKIE_SECURE: 'false' }).cookieSecure).toBe(false);
   });
 
   it('rejects invalid values with the variable name in the message', () => {

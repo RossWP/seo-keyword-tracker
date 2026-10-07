@@ -1,4 +1,6 @@
+import cookie from '@fastify/cookie';
 import helmet from '@fastify/helmet';
+import rateLimit from '@fastify/rate-limit';
 import Fastify, { type FastifyServerOptions } from 'fastify';
 import {
   serializerCompiler,
@@ -6,14 +8,19 @@ import {
   type ZodTypeProvider,
 } from 'fastify-type-provider-zod';
 import { registerErrorHandlers } from './lib/error-handler.js';
+import { registerSessionHooks, type CookieSettings } from './modules/auth/auth.plugin.js';
+import { authRoutes } from './modules/auth/auth.routes.js';
 import { healthRoutes } from './modules/health/health.routes.js';
+import type { Services } from './services.js';
 
 export interface AppDeps {
   logger: FastifyServerOptions['logger'];
   checkDatabase: () => Promise<void>;
+  services: Services;
+  cookies: CookieSettings;
 }
 
-export function buildApp({ logger, checkDatabase }: AppDeps) {
+export function buildApp({ logger, checkDatabase, services, cookies }: AppDeps) {
   const app = Fastify({
     logger,
     requestIdHeader: 'x-request-id',
@@ -28,7 +35,17 @@ export function buildApp({ logger, checkDatabase }: AppDeps) {
   });
 
   void app.register(helmet);
+  void app.register(cookie);
+  void app.register(rateLimit, { global: false });
   void app.register(healthRoutes(checkDatabase));
+
+  void app.register(
+    async (api) => {
+      registerSessionHooks(api, services.auth, cookies);
+      await api.register(authRoutes(services.auth, cookies), { prefix: '/auth' });
+    },
+    { prefix: '/api' },
+  );
 
   return app;
 }

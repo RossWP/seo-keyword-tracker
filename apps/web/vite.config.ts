@@ -9,9 +9,10 @@ export default defineConfig({
   server: {
     port: 5173,
     // Same-origin API in dev: the browser only talks to Vite, so no CORS and cookies just work.
+    // The Host header is kept so the API's same-origin check sees the browser's origin.
     proxy: {
-      '/api': apiTarget,
-      '/health': apiTarget,
+      '/api': { target: apiTarget, changeOrigin: false },
+      '/health': { target: apiTarget, changeOrigin: false },
     },
   },
   test: {

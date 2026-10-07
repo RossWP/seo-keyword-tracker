@@ -1,11 +1,19 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
-import { buildApp } from './app.js';
 import { AppError } from './lib/errors.js';
+import { createTestContext, type TestContext } from './test/context.js';
 
-function createApp(checkDatabase: () => Promise<void> = () => Promise.resolve()) {
-  return buildApp({ logger: false, checkDatabase });
+let context: TestContext | undefined;
+
+function createApp(checkDatabase?: () => Promise<void>) {
+  context = createTestContext({ checkDatabase });
+  return context.app;
 }
+
+afterEach(async () => {
+  await context?.close();
+  context = undefined;
+});
 
 describe('GET /health', () => {
   it('returns 200 when the database answers', async () => {
