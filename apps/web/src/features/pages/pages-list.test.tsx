@@ -130,6 +130,20 @@ describe('pages list', () => {
     });
   });
 
+  it('moves a page number past the end to the last page', async () => {
+    const requests = pagesApi((url) => ({
+      items: [page(Number(url.searchParams.get('page')))],
+      page: Number(url.searchParams.get('page')),
+      pageSize: 20,
+      total: 45,
+    }));
+    const { router } = renderRoute('/?page=9');
+
+    expect(await screen.findByText('41–45 of 45 pages')).toBeInTheDocument();
+    expect(router.state.location.search).toBe('?page=3');
+    expect(requests.at(-1)?.searchParams.get('page')).toBe('3');
+  });
+
   it('offers to clear a search with no results', async () => {
     pagesApi(() => ({ items: [], page: 1, pageSize: 20, total: 0 }));
     renderRoute('/?q=nothing');

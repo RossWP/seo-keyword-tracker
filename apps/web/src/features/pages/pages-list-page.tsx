@@ -16,13 +16,13 @@ function useListParams() {
     q: params.get('q') ?? '',
     page: Number.isInteger(pageNumber) && pageNumber >= 1 ? pageNumber : 1,
   };
-  const update = (changes: Partial<typeof values>) => {
+  const update = (changes: Partial<typeof values>, options?: { replace?: boolean }) => {
     const next = { ...values, page: 1, ...changes };
     const search = new URLSearchParams();
     if (next.clientId) search.set('clientId', next.clientId);
     if (next.q) search.set('q', next.q);
     if (next.page > 1) search.set('page', String(next.page));
-    setParams(search);
+    setParams(search, options);
   };
   return [values, update] as const;
 }
@@ -54,6 +54,11 @@ export function PagesListPage() {
   const crawling = clients.data?.filter((client) => isCrawling(client.crawlStatus)) ?? [];
   const total = pages.data?.total ?? 0;
   const lastPage = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  // A bookmarked ?page=9 after pages were removed (or a hand-edited URL): go to the last page.
+  const pastTheEnd = pages.isSuccess && !pages.isPlaceholderData && params.page > lastPage;
+  useEffect(() => {
+    if (pastTheEnd) update({ ...params, page: lastPage }, { replace: true });
+  });
 
   return (
     <section>

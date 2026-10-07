@@ -15,7 +15,9 @@ export function PositionBadge({
           ? 'bg-sky-100 text-sky-800'
           : 'bg-slate-100 text-slate-700';
   const label = position === null ? '—' : `#${position}`;
-  const title = position === null ? 'Not in the top 100' : `Position ${position}`;
+  // A null position with a date is a real "not ranked" day; without one there is no history yet.
+  const title =
+    position !== null ? `Position ${position}` : date ? 'Not in the top 100' : 'No history yet';
   return (
     <span
       className={`inline-block min-w-8 rounded px-1.5 py-0.5 text-center text-xs font-medium tabular-nums ${tone}`}
