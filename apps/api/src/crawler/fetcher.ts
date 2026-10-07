@@ -206,9 +206,15 @@ function toCrawlError(error: unknown, url: string, signal: AbortSignal): CrawlEr
   return new CrawlError('site_unreachable', `Could not reach ${url}`, { cause: error });
 }
 
-/** Decodes a body using the charset from the Content-Type header, falling back to UTF-8. */
+/**
+ * Decodes a body using the charset from the Content-Type header, then a <meta charset> in the
+ * first kilobyte (for HTML), falling back to UTF-8.
+ */
 export function decodeBody(body: Uint8Array, contentType: string): string {
-  const charset = /charset=["']?([\w-]+)/i.exec(contentType)?.[1];
+  const head = new TextDecoder('latin1').decode(body.subarray(0, 1024));
+  const charset =
+    /charset=["']?([\w-]+)/i.exec(contentType)?.[1] ??
+    /<meta[^>]+charset=["']?([\w-]+)/i.exec(head)?.[1];
   try {
     return new TextDecoder(charset ?? 'utf-8').decode(body);
   } catch {
