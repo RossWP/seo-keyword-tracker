@@ -1,6 +1,6 @@
 import { vi } from 'vitest';
 
-type Handler = (request: { body: unknown; url: URL }) => Response | Promise<Response>;
+export type FakeHandler = (request: { body: unknown; url: URL }) => Response | Promise<Response>;
 
 export const json = (status: number, body?: unknown): Response =>
   new Response(body === undefined ? null : JSON.stringify(body), {
@@ -16,8 +16,8 @@ export const apiError = (status: number, code: string, message: string): Respons
  * matching and available as `url.searchParams`). Health answers ok and
  * /api/auth/me answers 401 unless overridden; anything else is a 404 envelope.
  */
-export function fakeApi(handlers: Record<string, Handler> = {}) {
-  const all: Record<string, Handler> = {
+export function fakeApi(handlers: Record<string, FakeHandler> = {}) {
+  const all: Record<string, FakeHandler> = {
     'GET /health': () => json(200, { status: 'ok', database: 'up' }),
     'GET /api/auth/me': () => apiError(401, 'unauthorized', 'Sign in to continue'),
     ...handlers,
