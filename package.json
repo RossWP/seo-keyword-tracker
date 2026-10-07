@@ -15,6 +15,7 @@
     "test": "pnpm --recursive --if-present test",
     "dev": "pnpm --recursive --parallel dev",
     "db:migrate": "pnpm --filter @tracker/api db:migrate",
+    "seed": "pnpm --filter @tracker/api seed",
     "check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test"
   },
   "devDependencies": {
