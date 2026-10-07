@@ -87,10 +87,10 @@ function collectCandidates(page: PageFacts, brand: Set<string>): Map<string, Can
   };
   // Single words count only where the author chose them deliberately (title, H1, slug, headings).
   const addFrom = (source: Exclude<KeywordSource, 'body'>, texts: (string | null)[]) => {
-    const phrasesOnly = source === 'meta' || source === 'intro';
+    const runningText = source === 'meta' || source === 'intro';
     for (const text of texts) {
-      for (const term of text ? phrases(text) : []) {
-        if (isBrand(term) || (phrasesOnly && !term.includes(' '))) continue;
+      for (const term of text ? phrases(text, { innerStopwords: !runningText }) : []) {
+        if (isBrand(term) || (runningText && !term.includes(' '))) continue;
         get(term).sources.add(source);
       }
     }
@@ -104,7 +104,7 @@ function collectCandidates(page: PageFacts, brand: Set<string>): Map<string, Can
   addFrom('meta', [page.metaDescription]);
   addFrom('intro', [page.mainText.split(/\s+/).slice(0, INTRO_WORDS).join(' ')]);
   // Body counts only for phrases that already exist; otherwise every body n-gram is a candidate.
-  for (const term of phrases(page.mainText)) {
+  for (const term of phrases(page.mainText, { innerStopwords: false })) {
     const candidate = candidates.get(term);
     if (candidate) candidate.bodyCount++;
     else if (term.includes(' ') && !isBrand(term)) get(term).bodyCount++;
@@ -112,22 +112,29 @@ function collectCandidates(page: PageFacts, brand: Set<string>): Map<string, Can
   return candidates;
 }
 
-/** All 1–4 word phrases that don't cross punctuation or start/end with a stopword. */
-export function phrases(text: string): string[] {
+/**
+ * All 1–4 word phrases that don't cross punctuation, start or end with a stopword or a number,
+ * or end in a possessive. Stopwords inside a phrase ("data science for seo") are allowed only
+ * in short, deliberate texts like titles; in running text they mostly produce fragments
+ * ("analysis is the process").
+ */
+export function phrases(text: string, { innerStopwords = true } = {}): string[] {
   const result: string[] = [];
   const segments = text
     .normalize('NFKC')
     .toLowerCase()
+    .replace(/[’‘]/g, "'")
     .split(/[.,;:!?()[\]{}"“”|/\\–—]+|\s-\s/u);
   for (const segment of segments) {
-    const words = segment.match(/[\p{L}\p{N}]+(?:['’][\p{L}]+)?/gu) ?? [];
+    const words = segment.match(/[\p{L}\p{N}]+(?:'[\p{L}]+)?/gu) ?? [];
     for (let start = 0; start < words.length; start++) {
       for (let length = 1; length <= 4 && start + length <= words.length; length++) {
         const slice = words.slice(start, start + length);
         const first = slice[0] ?? '';
         const last = slice.at(-1) ?? '';
         if (STOPWORDS.has(first) || STOPWORDS.has(last)) continue;
-        if (slice.every((word) => /^\d+$/.test(word))) continue;
+        if (/^\d+$/.test(first) || /^\d+$/.test(last) || last.endsWith("'s")) continue;
+        if (!innerStopwords && slice.some((word) => STOPWORDS.has(word))) continue;
         if (length === 1 && first.length < 3) continue;
         result.push(slice.join(' '));
       }

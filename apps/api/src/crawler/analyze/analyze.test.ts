@@ -85,6 +85,26 @@ describe('extractPage', () => {
 });
 
 describe('phrases', () => {
+  it('skips number edges, possessive endings and contractions', () => {
+    const result = phrases(
+      'Should you update to WordPress 5.0? Facebook’s algorithm: you’re 8 keyword tools away',
+    );
+    expect(result).toContain('wordpress');
+    expect(result).toContain('keyword tools');
+    expect(result).not.toContain('wordpress 5');
+    expect(result).not.toContain('0');
+    expect(result).not.toContain("facebook's");
+    expect(result).not.toContain('8 keyword');
+    expect(result.some((term) => term.includes("you're"))).toBe(false);
+  });
+
+  it('allows stopwords inside a phrase only for titles and headings', () => {
+    expect(phrases('Data science for SEO')).toContain('data science for seo');
+    expect(
+      phrases('Keyword analysis is the process of finding terms', { innerStopwords: false }),
+    ).not.toContain('analysis is the process');
+  });
+
   it('builds 1–4 word phrases that do not start or end with stopwords or cross punctuation', () => {
     const result = phrases('How to rank: the keyword research guide.');
     expect(result).toContain('keyword research');

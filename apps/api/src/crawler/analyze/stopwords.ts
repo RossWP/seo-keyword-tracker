@@ -9,7 +9,8 @@ of off on once only or other our ours ourselves out over own per same she should
 than that the their theirs them themselves then there these they this those through to too
 under until up upon us very via was we were what when where which while who whom whose why will
 with within without would yet you your yours yourself yourselves vs etc one two new use using
-used make makes way ways learn read`
+used make makes way ways learn read don't doesn't isn't aren't can't won't it's that's what's
+there's let's i'm you're we're they're you've we've you'll we'll`
     .split(/\s+/)
     .filter(Boolean),
 );
