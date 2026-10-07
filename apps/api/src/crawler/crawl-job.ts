@@ -27,12 +27,16 @@ export interface CrawlDeps {
   /** Crawl-delay is honoured up to this; Semrush asks for 20 s, which would make 15 pages take 5 min. */
   maxDelayMs?: number;
   limit?: number;
+  /** How often a running crawl proves it is alive, including during slow discovery. */
+  heartbeatMs?: number;
 }
 
 const PAGE_MAX_BYTES = 5_000_000;
 const HTML_ACCEPT = 'text/html,application/xhtml+xml;q=0.9,*/*;q=0.5';
 /** Stop early when the site keeps refusing us; the rest would fail the same way. */
 const MAX_CONSECUTIVE_BLOCKS = 3;
+/** Well under the 2-minute staleness limit after which a crawl counts as abandoned. */
+const HEARTBEAT_MS = 30_000;
 
 interface FetchedEntry {
   pageId: string;
@@ -54,6 +58,13 @@ export async function crawlClient(
   const client = await claimCrawl(db, clientId, now());
   if (!client) return;
   const clientLog = log.child({ clientId, site: client.websiteUrl });
+  // Discovery alone can take minutes on a slow site; without this the resume loop would think
+  // the crawl was abandoned and start a second one.
+  const heartbeat = setInterval(() => {
+    updateClientCrawl(db, clientId, { crawlHeartbeatAt: now() }).catch((error: unknown) => {
+      clientLog.warn({ err: error }, 'heartbeat failed');
+    });
+  }, deps.heartbeatMs ?? HEARTBEAT_MS);
 
   try {
     const discovery = await discoverBlog(client.websiteUrl, {
@@ -161,6 +172,8 @@ export async function crawlClient(
       crawlErrorMessage: known ? error.message : 'Unexpected error while crawling',
       crawlFinishedAt: now(),
     });
+  } finally {
+    clearInterval(heartbeat);
   }
 }
 

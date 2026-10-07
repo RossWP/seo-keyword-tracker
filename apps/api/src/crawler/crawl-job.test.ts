@@ -197,6 +197,36 @@ describe('crawlClient', () => {
   });
 });
 
+describe('heartbeat', () => {
+  it('keeps the heartbeat fresh while discovery is still running', async () => {
+    let releaseHomepage: () => void = () => undefined;
+    const homepageHeld = new Promise<void>((resolve) => {
+      releaseHomepage = resolve;
+    });
+    const site = await blogSite({
+      '/': (_request, response) => {
+        void homepageHeld.then(() =>
+          response
+            .writeHead(200, { 'content-type': 'text/html' })
+            .end('<nav><a href="/blog/">Blog</a></nav>'),
+        );
+      },
+    });
+    const client = await createClient(site.origin);
+    const crawl = crawlClient(client.id, { ...deps(), heartbeatMs: 50 });
+
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    const claimed = (await loadClient(client.id))?.crawlHeartbeatAt?.getTime() ?? 0;
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    const later = (await loadClient(client.id))?.crawlHeartbeatAt?.getTime() ?? 0;
+    releaseHomepage();
+    await crawl;
+
+    expect((await loadClient(client.id))?.crawlStatus).toBe('partial');
+    expect(later).toBeGreaterThan(claimed);
+  });
+});
+
 describe('crawl runner and restarts', () => {
   it('requeues crawls a stopped process left running, and the runner completes them', async () => {
     const site = await blogSite();

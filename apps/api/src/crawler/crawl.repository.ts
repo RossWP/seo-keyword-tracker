@@ -55,7 +55,13 @@ export async function saveAnalysis(
     if (picks.length > 0) {
       await tx
         .insert(keywords)
-        .values(picks.map(({ term }) => ({ term })))
+        // Sorted, so concurrent crawls lock shared keyword rows in the same order (no deadlock).
+        .values(
+          picks
+            .map(({ term }) => term)
+            .sort()
+            .map((term) => ({ term })),
+        )
         .onConflictDoNothing();
       const rows = await tx
         .select({ id: keywords.id, term: keywords.term })
