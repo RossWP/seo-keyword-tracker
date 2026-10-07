@@ -12,6 +12,8 @@ export interface TestContext {
   readonly app: App;
   db: Database;
   clock: { now: Date };
+  /** Client ids the app asked to crawl (the crawl itself is tested separately). */
+  enqueued: string[];
   reset(): Promise<void>;
   close(): Promise<void>;
 }
@@ -28,6 +30,7 @@ export function createTestContext(
   const pool = new pg.Pool({ connectionString: testDatabaseUrl(), max: 4 });
   const db = createDb(pool);
   const clock = { now: START };
+  const enqueued: string[] = [];
   const services = createServices({ db, now: () => clock.now });
   const build = () =>
     buildApp({
@@ -35,6 +38,7 @@ export function createTestContext(
       checkDatabase: options.checkDatabase ?? (() => Promise.resolve()),
       services,
       db,
+      enqueueCrawl: (clientId: string) => enqueued.push(clientId),
       cookies: { secure: false },
     });
   let app = build();
@@ -45,10 +49,12 @@ export function createTestContext(
     },
     db,
     clock,
+    enqueued,
     async reset() {
       await app.close();
       app = build();
       clock.now = START;
+      enqueued.length = 0;
       await db.execute(sql`truncate users, keywords restart identity cascade`);
     },
     async close() {

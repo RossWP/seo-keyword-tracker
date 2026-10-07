@@ -21,10 +21,12 @@ export interface AppDeps {
   checkDatabase: () => Promise<void>;
   services: Services;
   db: Database;
+  /** Schedules a background crawl; the crawl state itself is stored on the client row. */
+  enqueueCrawl: (clientId: string) => void;
   cookies: CookieSettings;
 }
 
-export function buildApp({ logger, checkDatabase, services, db, cookies }: AppDeps) {
+export function buildApp({ logger, checkDatabase, services, db, enqueueCrawl, cookies }: AppDeps) {
   const app = Fastify({
     logger,
     requestIdHeader: 'x-request-id',
@@ -47,7 +49,7 @@ export function buildApp({ logger, checkDatabase, services, db, cookies }: AppDe
     async (api) => {
       registerSessionHooks(api, services.auth, cookies);
       await api.register(authRoutes(services.auth, cookies), { prefix: '/auth' });
-      await api.register(clientRoutes(db), { prefix: '/clients' });
+      await api.register(clientRoutes(db, enqueueCrawl), { prefix: '/clients' });
       await api.register(pageRoutes(db), { prefix: '/pages' });
     },
     { prefix: '/api' },

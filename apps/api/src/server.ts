@@ -29,6 +29,10 @@ const app = buildApp({
   },
   services,
   db,
+  // The runner is created just below (it logs through the app); this is only called per request.
+  enqueueCrawl: (clientId) => {
+    crawler.enqueue(clientId);
+  },
   cookies: { secure: config.cookieSecure },
 });
 
