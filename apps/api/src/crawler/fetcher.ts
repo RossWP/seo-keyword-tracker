@@ -33,9 +33,16 @@ export interface OpenedResponse {
   chunks: AsyncIterable<Uint8Array>;
 }
 
+export interface RequestOptions {
+  accept: string;
+  maxBytes: number;
+  /** Overrides the fetcher's per-attempt timeout, e.g. for large, slowly generated sitemaps. */
+  timeoutMs?: number;
+}
+
 export interface Fetcher {
-  fetch(url: string, options: { accept: string; maxBytes: number }): Promise<FetchedPage>;
-  open(url: string, options: { accept: string; maxBytes: number }): Promise<OpenedResponse>;
+  fetch(url: string, options: RequestOptions): Promise<FetchedPage>;
+  open(url: string, options: RequestOptions): Promise<OpenedResponse>;
 }
 
 const RETRY_STATUSES = new Set([429, 500, 502, 503, 504]);
@@ -48,10 +55,9 @@ export function createFetcher({
   attempts = 3,
   allowPrivateNetworks = false,
 }: FetcherOptions): Fetcher {
+  // Deadlines come from the per-attempt AbortSignal below, so one request can be given longer.
   const dispatcher = new Agent({
     connect: allowPrivateNetworks ? {} : { lookup: publicOnlyLookup },
-    headersTimeout: timeoutMs,
-    bodyTimeout: timeoutMs,
   });
 
   /** One attempt: follows redirects by hand so every hop is validated. */
@@ -90,10 +96,10 @@ export function createFetcher({
 
   async function open(
     url: string,
-    { accept, maxBytes }: { accept: string; maxBytes: number },
+    { accept, maxBytes, timeoutMs: requestTimeoutMs }: RequestOptions,
   ): Promise<OpenedResponse> {
     for (let attempt = 1; ; attempt++) {
-      const signal = AbortSignal.timeout(timeoutMs);
+      const signal = AbortSignal.timeout(requestTimeoutMs ?? timeoutMs);
       try {
         const { url: finalUrl, response } = await request(url, accept, signal);
         if (RETRY_STATUSES.has(response.status) && attempt < attempts) {

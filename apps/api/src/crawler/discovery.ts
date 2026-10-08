@@ -1,5 +1,5 @@
 import * as cheerio from 'cheerio';
-import { isSameSite, normalizePageUrl } from '../lib/url.js';
+import { isSameSite, normalizePageUrl, siteKeyOf } from '../lib/url.js';
 import { CrawlError } from './errors.js';
 import { decodeBody, type Fetcher } from './fetcher.js';
 import { parseRobots } from './robots.js';
@@ -33,6 +33,8 @@ const HTML = 'text/html,application/xhtml+xml;q=0.9,*/*;q=0.5';
 const XML = 'application/xml,text/xml;q=0.9,text/plain;q=0.8,*/*;q=0.5';
 const PAGE_MAX_BYTES = 5_000_000;
 const SITEMAP_MAX_BYTES = 50_000_000;
+/** Big blog sitemaps are often generated on request and arrive slowly (Ahrefs: 2.6 MB in ~26 s). */
+const SITEMAP_TIMEOUT_MS = 60_000;
 /** URLs read per candidate sitemap: enough to judge it and to find 15 posts after filtering. */
 const SAMPLE_SIZE = 500;
 const MAX_SITEMAP_FETCHES = 30;
@@ -100,6 +102,21 @@ const ARCHIVE_SEGMENTS = new Set([
   'feed',
   'wp-json',
 ]);
+const GENERIC_NAME_WORDS = new Set([
+  'sitemap',
+  'sitemaps',
+  'index',
+  'xml',
+  'gz',
+  'partition',
+  'part',
+]);
+/** Hub URLs that prove a sitemap carries the blog, even among everything else. */
+const MIN_HUB_URLS = 5;
+/** Parts of a split sitemap read while looking for the blog. */
+const MAX_PARTS_TO_SCAN = 10;
+/** "fr", "de-de", "pt-br", "zh-hans": a language or region segment in a path. */
+const LOCALE_SEGMENT = /^[a-z]{2}(-[a-z]{2,4})?$/;
 const NON_HTML = /\.(pdf|jpe?g|png|gif|webp|svg|zip|mp4|mp3|xml|json|css|js|txt)$/i;
 
 /**
@@ -112,28 +129,43 @@ export async function discoverBlog(
   { fetcher, robotsAgent, limit = 15 }: DiscoveryOptions,
 ): Promise<BlogDiscovery> {
   const homepage = await fetchHomepage(siteUrl, fetcher);
-  const origin = new URL(homepage.url).origin;
   const hubUrl = findBlogHub(homepage.html, homepage.url, siteUrl);
+  // A blog on its own subdomain has its own robots.txt and sitemaps: discovery continues there.
+  const origin = new URL(hubUrl && !isSameSite(hubUrl, homepage.url) ? hubUrl : homepage.url)
+    .origin;
 
   const robotsUrl = `${origin}/robots.txt`;
   const robots = parseRobots(robotsUrl, await fetchRobots(robotsUrl, fetcher));
   const crawlDelay = robots.getCrawlDelay(robotsAgent) ?? robots.getCrawlDelay('*') ?? null;
 
-  // robots.txt entries first; if none of them leads to blog posts (missing, broken, or an
-  // index whose children are dead), the conventional locations get their turn.
-  const sources = [
-    { urls: robots.getSitemaps().filter((url) => isHttpUrl(url) && isSameSite(url, origin)) },
-    { urls: CONVENTIONAL_SITEMAPS.map((path) => origin + path), firstOnly: true },
+  // First round: robots.txt entries plus the sitemap next to the blog hub, judged together.
+  // Blogs often run their own CMS with their own sitemap (/blog/sitemap_index.xml) that the
+  // site's robots.txt or root sitemap never mentions. If that round finds no blog posts
+  // (nothing listed, broken, or an index whose children are dead), the root locations get
+  // their turn.
+  const robotsSitemaps = robots
+    .getSitemaps()
+    .filter((url) => isHttpUrl(url) && isSameSite(url, origin));
+  const rounds = [
+    [{ urls: robotsSitemaps }, { urls: hubSitemapUrls(hubUrl, origin), firstOnly: true }],
+    [{ urls: CONVENTIONAL_SITEMAPS.map((path) => origin + path), firstOnly: true }],
   ];
   let foundSitemap = false;
   let found: { family: Family; posts: string[] } | null = null;
-  for (const source of sources) {
-    const candidates = await collectCandidates(origin, source.urls, fetcher, source.firstOnly);
+  for (const round of rounds) {
+    const candidates = new Map<string, Candidate>();
+    for (const { urls, firstOnly } of round) {
+      for (const [url, candidate] of await collectCandidates(urls, fetcher, firstOnly)) {
+        if (!candidates.has(url)) candidates.set(url, candidate);
+      }
+    }
     if (candidates.size === 0) continue;
     foundSitemap = true;
     const [best] = await scoreFamilies(candidates, hubUrl, origin, fetcher);
     const posts = best
-      ? selectPosts(await familyUrls(best, fetcher, limit), origin, hubUrl, limit)
+      ? selectPosts(await familyUrls(best, origin, hubUrl, fetcher, limit), origin, hubUrl, limit, {
+          postsOnly: hasPostsName(best.members[0] ?? ''),
+        })
       : [];
     if (best && posts.length > 0) {
       found = { family: best, posts };
@@ -191,6 +223,13 @@ async function fetchRobots(url: string, fetcher: Fetcher): Promise<string> {
   }
 }
 
+/** blog.example.com is a subdomain of example.com (and of www.example.com); example.org is not. */
+function isSubdomainOf(hostname: string, siteHostname: string): boolean {
+  const host = hostname.toLowerCase();
+  const site = siteKeyOf(siteHostname);
+  return host !== site && host !== `www.${site}` && host.endsWith(`.${site}`);
+}
+
 /** The blog's landing page, as linked from the homepage ("Blog" in the nav), or the entered path. */
 export function findBlogHub(html: string, pageUrl: string, enteredUrl: string): string | null {
   const entered = new URL(enteredUrl);
@@ -202,19 +241,35 @@ export function findBlogHub(html: string, pageUrl: string, enteredUrl: string): 
   $('a[href]').each((_index, element) => {
     const anchor = $(element);
     const url = normalizePageUrl(anchor.attr('href') ?? '', pageUrl);
-    if (!url || !isSameSite(url, pageUrl) || new URL(url).pathname === '/') return;
+    if (!url) return;
+    const { hostname, pathname } = new URL(url);
+    // A blog often lives on its own subdomain (blog.example.com); any other host is not ours.
+    const onSubdomain = isSubdomainOf(hostname, new URL(pageUrl).hostname);
+    if (!onSubdomain && (!isSameSite(url, pageUrl) || pathname === '/')) return;
     const text = anchor.text().replace(/\s+/g, ' ').trim().toLowerCase();
-    const path = new URL(url).pathname.toLowerCase();
+    const path = pathname.toLowerCase();
+    const firstLabel = hostname.split('.')[0] ?? '';
 
     let score = 0;
     if (text === 'blog') score = 4;
     else if (BLOG_WORDS.includes(text)) score = 3;
     else if (/^[a-z]*-?blog\/?$/.test(path.split('/').filter(Boolean).join('/'))) score = 2;
+    else if (onSubdomain && BLOG_WORDS.includes(firstLabel)) score = 2;
     if (score === 0) return;
     if (anchor.closest('header, nav').length > 0) score += 1;
     if (!best || score > best.score) best = { url, score };
   });
   return (best as { url: string } | null)?.url ?? null;
+}
+
+/** The usual sitemap file names inside the blog hub's own path, e.g. /blog/sitemap_index.xml. */
+function hubSitemapUrls(hubUrl: string | null, origin: string): string[] {
+  if (!hubUrl || !isSameSite(hubUrl, origin)) return [];
+  const hubPath = new URL(hubUrl).pathname.replace(/\/?$/, '/');
+  if (hubPath === '/') return [];
+  return CONVENTIONAL_SITEMAPS.filter((path) => !path.startsWith('/blog/')).map(
+    (path) => `${origin}${hubPath}${path.slice(1)}`,
+  );
 }
 
 interface Candidate {
@@ -224,12 +279,11 @@ interface Candidate {
 }
 
 /**
- * Readable sitemaps among `urls` (same site only), with indexes expanded into their children
- * without fetching them yet. `firstOnly` stops at the first one that works: conventional
+ * Readable sitemaps among `urls`, with indexes expanded into their children without fetching
+ * them yet. `firstOnly` stops at the first one that works: conventional
  * locations are guesses, and one answer is enough.
  */
 async function collectCandidates(
-  origin: string,
   urls: string[],
   fetcher: Fetcher,
   firstOnly = false,
@@ -238,22 +292,20 @@ async function collectCandidates(
   for (const url of urls.slice(0, MAX_SITEMAP_FETCHES)) {
     const document = await tryReadSitemap(url, fetcher, SAMPLE_SIZE);
     if (!document) continue;
-    addDocument(candidates, { url, depth: 0, document }, origin);
+    addDocument(candidates, { url, depth: 0, document });
     if (firstOnly) break;
   }
   return candidates;
 }
 
-function addDocument(
-  candidates: Map<string, Candidate>,
-  candidate: Candidate,
-  origin: string,
-): void {
+function addDocument(candidates: Map<string, Candidate>, candidate: Candidate): void {
   const { document } = candidate;
   if (document?.kind === 'index') {
     if (candidate.depth >= MAX_INDEX_DEPTH) return;
+    // Children may sit on a CDN (Webflow serves its sitemaps from CloudFront); the posts they
+    // list must still belong to the site, which the sample check below makes sure of.
     for (const child of document.urls) {
-      if (isHttpUrl(child) && isSameSite(child, origin) && !candidates.has(child)) {
+      if (isHttpUrl(child) && !candidates.has(child)) {
         candidates.set(child, { url: child, depth: candidate.depth + 1 });
       }
     }
@@ -268,7 +320,11 @@ async function tryReadSitemap(
   maxUrls: number,
 ): Promise<SitemapDocument | null> {
   try {
-    const response = await fetcher.open(url, { accept: XML, maxBytes: SITEMAP_MAX_BYTES });
+    const response = await fetcher.open(url, {
+      accept: XML,
+      maxBytes: SITEMAP_MAX_BYTES,
+      timeoutMs: SITEMAP_TIMEOUT_MS,
+    });
     if (response.status !== 200) {
       for await (const _chunk of response.chunks) break;
       return null;
@@ -283,7 +339,9 @@ async function tryReadSitemap(
 interface Family {
   /** post-sitemap.xml, post-sitemap2.xml, … in index order. */
   members: string[];
+  /** Same-site URLs read so far, from the first `membersRead` members. */
   sample: string[];
+  membersRead: number;
   score: number;
 }
 
@@ -317,12 +375,32 @@ async function scoreFamilies(
       // An index inside an index: its children replace it and the ranking runs again. Documents
       // already read stay on their candidates, so nothing is fetched twice.
       candidates.delete(first.url);
-      addDocument(candidates, first, origin);
+      addDocument(candidates, first);
       expanded = true;
       continue;
     }
-    const sample = first.document.urls;
-    families.push({ members, sample, score: prior + contentScore(sample, hubUrl, hubPath) });
+    const sample = first.document.urls.filter((url) => isSameSite(url, origin));
+    let membersRead = 1;
+    // A sitemap split into partitions (Stripe: partition-0…8) may hold the blog in a later part:
+    // keep reading parts while the hub is known but none of its URLs has shown up yet.
+    if (hubPath && hubPath !== '/' && !nameTokens(first.url).some((t) => NEGATIVE_TOKENS.has(t))) {
+      while (
+        countUnder(sample, hubPath) < MIN_HUB_URLS &&
+        membersRead < Math.min(members.length, MAX_PARTS_TO_SCAN)
+      ) {
+        const next = await tryReadSitemap(members[membersRead] ?? '', fetcher, SAMPLE_SIZE);
+        membersRead++;
+        if (next?.kind === 'urlset')
+          sample.push(...next.urls.filter((url) => isSameSite(url, origin)));
+      }
+    }
+    if (!hasBlogEvidence(first.url, sample, hubPath)) continue;
+    families.push({
+      members,
+      sample,
+      membersRead,
+      score: prior + contentScore(sample, hubUrl, hubPath),
+    });
   }
   if (expanded) return scoreFamilies(candidates, hubUrl, origin, fetcher);
   return families.sort((a, b) => b.score - a.score);
@@ -339,13 +417,57 @@ function familyKey(url: string): string {
   return url.replace(/\d+(?=(\.xml)?(\.gz)?\/?$)/i, '');
 }
 
+/**
+ * A family only counts as the blog with at least one positive sign: a blog-like name, most URLs
+ * under the hub, or article-shaped URLs. Otherwise the only sitemap left (a glossary, a product
+ * catalogue) would be crawled as the blog just because nothing better was readable.
+ */
+function hasBlogEvidence(sitemapUrl: string, sample: string[], hubPath: string | null): boolean {
+  if (sample.length === 0) return false;
+  const name = new URL(sitemapUrl).pathname.toLowerCase();
+  if (nameTokens(sitemapUrl).some((token) => POSITIVE_TOKENS.has(token))) return true;
+  const paths = sample.map((url) => safePath(url));
+  if (hubPath && hubPath !== '/') {
+    if (isUnder(name, hubPath)) return true;
+    // Enough hub URLs count even in a sitemap of everything (Vercel lists docs, KB and blog).
+    const underHub = countUnder(sample, hubPath);
+    if (underHub >= MIN_HUB_URLS || underHub / paths.length >= 0.5) return true;
+  }
+  return paths.filter(isArticleShaped).length / paths.length >= 0.6;
+}
+
+/**
+ * Words in a sitemap's file name ("post-sitemap.xml" → post). When the name says nothing
+ * ("sitemap.xml", "partition-3.xml"), the folder speaks for it ("/blog/sitemap/" → blog).
+ * Without this, every sitemap inside /blog/ (links, quizzes, tags) would look like the posts.
+ */
+function nameTokens(sitemapUrl: string): string[] {
+  const segments = new URL(sitemapUrl).pathname.toLowerCase().split('/').filter(Boolean);
+  const words = (text: string) =>
+    text
+      .split(/[^a-z0-9]+/)
+      .filter((word) => word && !GENERIC_NAME_WORDS.has(word) && !/^\d+$/.test(word));
+  const own = words(segments.at(-1) ?? '');
+  return own.length > 0 ? own : words(segments.join('/'));
+}
+
+/** Hub URLs among `urls`, not counting the hub page itself. */
+function countUnder(urls: string[], hubPath: string): number {
+  return urls.filter((url) => {
+    const path = safePath(url);
+    return path !== hubPath && isUnder(path, hubPath);
+  }).length;
+}
+
 function nameScore(url: string, hubPath: string | null): number {
   const path = new URL(url).pathname.toLowerCase();
-  const tokens = path.split(/[^a-z0-9]+/).filter(Boolean);
+  const tokens = nameTokens(url);
   let score = 0;
   if (hubPath && hubPath !== '/' && isUnder(path, hubPath)) score += 40;
   if (tokens.some((token) => POSITIVE_TOKENS.has(token))) score += 15;
   if (tokens.some((token) => NEGATIVE_TOKENS.has(token))) score -= 30;
+  // A translated copy (/fr/blog/sitemap.xml) loses to the default language when both exist.
+  if (path.split('/').some((segment) => LOCALE_SEGMENT.test(segment))) score -= 10;
   return score;
 }
 
@@ -368,16 +490,27 @@ function isArticleShaped(path: string): boolean {
   const segments = path.split('/').filter(Boolean);
   if (segments.length === 0 || segments.length > 4) return false;
   const last = segments.at(-1) ?? '';
-  return (last.match(/-/g) ?? []).length >= 2 || /\/\d{4}\/\d{2}\//.test(path);
+  return (last.match(/[-_]/g) ?? []).length >= 2 || /\/\d{4}\/\d{2}\//.test(path);
 }
 
 /** URLs of the chosen family in order, reading more members only if the first is too short. */
-async function familyUrls(family: Family, fetcher: Fetcher, limit: number): Promise<string[]> {
+async function familyUrls(
+  family: Family,
+  origin: string,
+  hubUrl: string | null,
+  fetcher: Fetcher,
+  limit: number,
+): Promise<string[]> {
+  const hubPath = hubUrl ? new URL(hubUrl).pathname.toLowerCase() : null;
+  const enough = (urls: string[]) =>
+    hubPath && hubPath !== '/' && countUnder(urls, hubPath) > 0
+      ? countUnder(urls, hubPath) >= limit
+      : urls.length >= limit * 3;
   const urls = [...family.sample];
-  for (const member of family.members.slice(1)) {
-    if (urls.length >= limit * 3) break;
+  for (const member of family.members.slice(family.membersRead, MAX_PARTS_TO_SCAN)) {
+    if (enough(urls)) break;
     const document = await tryReadSitemap(member, fetcher, SAMPLE_SIZE);
-    if (document) urls.push(...document.urls);
+    if (document) urls.push(...document.urls.filter((url) => isSameSite(url, origin)));
   }
   return urls;
 }
@@ -388,16 +521,25 @@ export function selectPosts(
   origin: string,
   hubUrl: string | null,
   limit: number,
+  { postsOnly = false }: { postsOnly?: boolean } = {},
 ): string[] {
   const hubPath = hubUrl ? new URL(hubUrl).pathname.toLowerCase() : null;
   const normalized = urls
     .map((url) => normalizePageUrl(url))
     .filter((url): url is string => url !== null);
-  const underHub = (url: string) =>
-    hubPath !== null && hubPath !== '/' && isUnder(safePath(url), hubPath);
+  const sectionPath =
+    hubPath !== null && hubPath !== '/'
+      ? hubPath
+      : postsOnly
+        ? null
+        : inferSection(normalized, origin, limit);
+  // A generic sitemap of a whole site, with no hub and no posts section in it, is not a blog:
+  // taking its first 15 URLs would crawl promo and service pages.
+  if (hubPath === null && !postsOnly && sectionPath === null) return [];
+  const underHub = (url: string) => sectionPath !== null && isUnder(safePath(url), sectionPath);
   // In a sitemap that mixes everything, the blog is what sits under the hub.
   const restrictToHub =
-    normalized.filter((url) => underHub(url) && safePath(url) !== hubPath).length >= limit / 3;
+    normalized.filter((url) => underHub(url) && safePath(url) !== sectionPath).length >= limit / 3;
 
   const seen = new Set<string>();
   const posts: string[] = [];
@@ -407,7 +549,7 @@ export function selectPosts(
     seen.add(url);
     const path = safePath(url);
     const segments = path.split('/').filter(Boolean);
-    if (segments.length === 0 || path === hubPath) continue;
+    if (segments.length === 0 || path === hubPath || path === sectionPath) continue;
     if (restrictToHub && !underHub(url)) continue;
     if (segments.some((segment) => ARCHIVE_SEGMENTS.has(segment))) continue;
     if (/\/page\/\d+\/?$/.test(path) || NON_HTML.test(path)) continue;
@@ -426,4 +568,38 @@ function safePath(url: string): string {
 
 function isHttpUrl(value: string): boolean {
   return /^https?:\/\//i.test(value);
+}
+
+/** post-sitemap.xml, sitemap-posts.xml, sitemap_articles_1.xml: a sitemap of posts only. */
+function hasPostsName(sitemapUrl: string): boolean {
+  return nameTokens(sitemapUrl).some((token) => POSITIVE_TOKENS.has(token));
+}
+
+/**
+ * Without a hub, a sitemap that mixes everything (about pages, the archive, posts) still shows
+ * where posts live: a blog-word section (/blog/, /news/) with enough URLs, or a first path
+ * segment most URLs share (/p/ on Substack). Null when nothing stands out.
+ */
+function inferSection(urls: string[], origin: string, limit: number): string | null {
+  const counts = new Map<string, number>();
+  let total = 0;
+  for (const url of urls) {
+    if (!isSameSite(url, origin)) continue;
+    const segments = safePath(url).split('/').filter(Boolean);
+    if (segments.length < 2) continue;
+    total++;
+    const first = segments[0] ?? '';
+    counts.set(first, (counts.get(first) ?? 0) + 1);
+  }
+  // A language folder (/ua/, /en-us/) is the whole site in one language, not a section.
+  const ranked = [...counts.entries()]
+    .filter(([segment]) => !LOCALE_SEGMENT.test(segment))
+    .sort((a, b) => b[1] - a[1]);
+  const blogSection = ranked.find(
+    ([segment, count]) => BLOG_WORDS.includes(segment) && count >= limit / 3,
+  );
+  if (blogSection) return `/${blogSection[0]}/`;
+  const [top] = ranked;
+  if (!top || /^\d+$/.test(top[0])) return null; // /2024/05/… is a date, not a section
+  return top[1] >= limit / 3 && top[1] / Math.max(total, 1) >= 0.5 ? `/${top[0]}/` : null;
 }

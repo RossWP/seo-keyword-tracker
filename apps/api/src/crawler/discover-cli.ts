@@ -18,7 +18,9 @@ try {
   });
   console.log(`Site:        ${result.origin}`);
   console.log(`Blog hub:    ${result.hubUrl ?? '(not linked from the homepage)'}`);
-  console.log(`Sitemaps:    ${result.sitemapUrls.join(', ')}`);
+  const shown = result.sitemapUrls.slice(0, 3).join(', ');
+  const more = result.sitemapUrls.length - 3;
+  console.log(`Sitemaps:    ${shown}${more > 0 ? ` (+${more} more)` : ''}`);
   console.log(`Crawl-delay: ${result.crawlDelaySeconds ?? 'none'}`);
   console.log(`Posts (${result.entries.length}):`);
   for (const [index, entry] of result.entries.entries()) {

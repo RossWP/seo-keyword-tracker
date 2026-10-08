@@ -271,6 +271,10 @@ describe('shutdown', () => {
     await crawlClient(client.id, deps(), controller.signal);
 
     expect(await loadClient(client.id)).toMatchObject({ crawlStatus: 'pending', pagesDone: 0 });
-    expect(site.hits.some((path) => path.startsWith('/blog/'))).toBe(false);
+    // Discovery ran (it may look for sitemaps under /blog/), but no post was fetched.
+    const postsFetched = site.hits.filter(
+      (path) => path.startsWith('/blog/') && !path.includes('sitemap'),
+    );
+    expect(postsFetched).toEqual([]);
   });
 });
