@@ -2,6 +2,76 @@
 
 The README is the one-page summary; this file has the detail behind it.
 
+## Project structure
+
+```text
+compose.yaml, Dockerfile     Postgres, API and web (nginx) containers; `pnpm start` runs them
+apps/api/
+  migrations/                SQL migrations (pg_trgm, schema), applied on API start and by the seed
+  src/server.ts              process entry: migrations, crawl runner, resume on boot, graceful stop
+  src/app.ts                 Fastify app: helmet, cookies, rate limit, routes under /api
+  src/db/schema.ts           tables, constraints and indexes (Drizzle)
+  src/lib/                   error envelope, URL normalisation, passwords, LIKE escaping
+  src/modules/auth/          session cookie, Origin check, login / logout / me
+  src/modules/clients/       list, add (202 + background crawl), detail, recrawl
+  src/modules/pages/         list with search and pagination, detail, rank history (raw SQL)
+  src/crawler/discovery.ts   blog sitemap discovery (see below)
+  src/crawler/fetcher.ts     HTTP: SSRF guard on every hop, retries, timeouts, size caps
+  src/crawler/crawl-job.ts   one client's crawl end to end; crawl-runner.ts queues them
+  src/crawler/analyze/       page facts, keyword scoring, SEO issue rules
+  src/seed/                  demo users and clients, deterministic rank history
+  src/test/                  test database, app context, factories, fixture HTTP server
+apps/web/src/
+  api/client.ts              fetch wrapper: error envelope → ApiError, Zod-checked responses
+  app/                       routes, layout, not-found page
+  features/auth/             login, protected routes, session handling
+  features/pages/            pages list, page detail, rank chart, time-zone dates
+  features/clients/          clients list with crawl progress, add-client form
+```
+
+## API
+
+All routes except `/health` and `POST /api/auth/login` need the session cookie; without it they
+answer 401. Every error has one shape: `{ "error": { "code", "message", "details"? } }`.
+Validation errors list the bad fields in `details.issues[].path` (for example `body.websiteUrl`).
+State-changing requests from another origin get 403 `forbidden_origin`.
+
+| Method and path                 | Success                                              | Errors                                                   |
+| ------------------------------- | ---------------------------------------------------- | -------------------------------------------------------- |
+| `GET /health`                   | 200 `{ status, database: "up" }`                     | 503 when the database is down                            |
+| `POST /api/auth/login`          | 200 `{ user }` and the `sid` cookie                  | 400, 401 `invalid_credentials`, 429 `rate_limited`       |
+| `POST /api/auth/logout`         | 204                                                  | —                                                        |
+| `GET /api/auth/me`              | 200 `{ user: { id, email, timezone } }`              | 401                                                      |
+| `GET /api/clients`              | 200 `{ items }` with crawl status and progress       | 401                                                      |
+| `POST /api/clients`             | 202 and `Location`; the crawl runs in the background | 400 `invalid_url` / `blocked_host`, 409 `duplicate_site` |
+| `GET /api/clients/:id`          | 200                                                  | 404                                                      |
+| `POST /api/clients/:id/recrawl` | 202                                                  | 404, 409 `crawl_in_progress`                             |
+| `GET /api/pages`                | 200 `{ items, page, pageSize, total }`               | 400, 404 for a `clientId` that isn't yours               |
+| `GET /api/pages/:id`            | 200: page, keywords with latest position, issues     | 404                                                      |
+| `GET /api/pages/:id/rankings`   | 200 `{ timezone, from, to, series }`                 | 400 `invalid_range`, 404                                 |
+
+`GET /api/pages` takes `clientId`, `q` (URL or keyword), `page` and `pageSize` (at most 100).
+`rankings` takes `from` and `to` as dates in the user's time zone: 90 days by default, 730 at
+most. A foreign, unknown or malformed id is always 404, never 403.
+
+## Data model
+
+| Table            | Holds                                                    | Keys, constraints, indexes                                                 |
+| ---------------- | -------------------------------------------------------- | -------------------------------------------------------------------------- |
+| `users`          | email, argon2 hash, time zone (`America/Toronto`)        | unique email, checked to be lowercase                                      |
+| `sessions`       | SHA-256 of the cookie token, user, expiry                | the raw token is never stored; index on expiry for cleanup                 |
+| `clients`        | owner, name, URL, `site_key`, crawl status and progress  | unique `(user_id, site_key)`: one site per user however the URL is written |
+| `pages`          | one URL of a client, sitemap position, fetch result      | unique `(client_id, url)`, so a recrawl updates in place; trigram on URL   |
+| `keywords`       | normalised search terms, shared by all pages             | unique term; trigram index for search                                      |
+| `page_keywords`  | a page's keyword with score, rank and where it was found | unique `(page_id, keyword_id)`                                             |
+| `seo_issues`     | code, severity, message, details per page                | unique `(page_id, code)`                                                   |
+| `rank_snapshots` | position 1–100, or null when not in the top 100          | PK `(page_keyword_id, snapshot_date)`: one per pair per UTC day            |
+
+`rank_snapshots` also has an index on `(page_keyword_id, captured_at DESC NULLS LAST)`, so the
+latest position of a keyword is a single index lookup. Ownership runs user → client → page → page
+keyword → snapshot, with cascading deletes. Times are `timestamptz` (UTC); dates shown to the user
+are converted in SQL to their time zone.
+
 ## What's implemented
 
 - **Seed:** 2 users with one client each, 15 posts per client crawled live. The demo data is

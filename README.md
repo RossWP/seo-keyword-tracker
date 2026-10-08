@@ -2,7 +2,8 @@
 
 Add a client's website. The app finds its blog sitemap on its own, crawls the first 15 posts,
 extracts keywords and SEO issues, and shows daily rank positions in the user's time zone
-(Toronto). Details of each part are in [docs/design.md](docs/design.md).
+(Toronto). Project structure, API, data model and design details are in
+[docs/design.md](docs/design.md).
 
 ## How to run it
 
