@@ -9,15 +9,22 @@ extracts keywords and SEO issues, and shows daily rank positions in the user's t
 Needs Node 24 (`nvm use`), pnpm 12 (`npm i -g pnpm@12`), Docker, and internet access (the seed
 crawls semrush.com and yoast.com, about 1–2 minutes).
 
+Everything in Docker, then the seed; open http://localhost:8080:
+
 ```bash
-pnpm install
-docker compose up -d --wait db   # Postgres 18 on localhost:5433
-pnpm seed                        # migrations, 2 users, 2 clients, live crawl, ≥50k snapshots
-pnpm dev                         # http://localhost:5173 (API on :3000)
+pnpm start
 ```
 
-Or all in containers: `docker compose up -d --build --wait`, then
-`docker compose exec api node dist/seed/seed.js`, and open http://localhost:8080.
+For development (Postgres in Docker, the seed, then dev servers on http://localhost:5173):
+
+```bash
+pnpm install
+pnpm start:dev
+```
+
+`pnpm start` runs `docker compose up -d --build --wait`, then the seed inside the API container.
+`pnpm start:dev` runs `docker compose up -d --wait db`, `pnpm seed` (migrations, 2 users, 2
+clients, live crawl, ≥50k snapshots) and `pnpm dev`. `pnpm reset` deletes the database volume.
 
 Sign in as `alice@agency.test` (Semrush) or `bob@agency.test` (Yoast), password `demo-password`.
 `.env` is optional (see `.env.example`). `pnpm seed` is safe to re-run; `--recrawl` crawls again.

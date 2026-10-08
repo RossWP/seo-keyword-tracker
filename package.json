@@ -8,6 +8,9 @@
     "node": ">=24 <25"
   },
   "scripts": {
+    "start": "docker compose up -d --build --wait && docker compose exec api node dist/seed/seed.js",
+    "start:dev": "docker compose up -d --wait db && pnpm seed && pnpm dev",
+    "reset": "docker compose down -v",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "lint": "eslint . --max-warnings=0",
